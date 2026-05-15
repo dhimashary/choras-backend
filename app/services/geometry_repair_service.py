@@ -639,7 +639,6 @@ def trim_segment_face_intersections_iterative(
             bbox_pad=1e-9,
             max_reports=2000,
             skip_warped_faces=True,
-            logger=logger,
         )
 
         seg_face_hits = [
@@ -989,7 +988,6 @@ def repair_plc_single_splits_iterative(
             bbox_pad=1e-9,
             max_reports=2000,
             skip_warped_faces=True,
-            logger=logger,
         )
 
         summary["remaining_plc_hits"] = len(plc_hits)

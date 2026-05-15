@@ -197,7 +197,7 @@ def convert_tjunctions_to_standard_format(tjunctions: List[Dict[str, Any]]) -> L
     list[dict]
         Standardized reports with "points" and "severity" keys.
         Each report contains:
-        - "points": list of dicts with "type" ("edge" or "vertex") and "points" (coordinates).
+        - "elements": list of dicts with "type" ("edge" or "vertex") and "points" (coordinates).
         - "severity": str, always "high".
     """
     standardized = []
@@ -213,8 +213,7 @@ def convert_tjunctions_to_standard_format(tjunctions: List[Dict[str, Any]]) -> L
             }
         ]
         standardized.append({
-            "type": "vertex_on_edge",
-            "points": points,
+            "elements": points,
             "severity": "high"
         })
     return standardized
@@ -233,8 +232,7 @@ def convert_intersections_to_standard_format(intersections: List[Dict[str, Any]]
     list[dict]
         Standardized reports with "type", "points", and "severity" keys.
         Each report contains:
-        - "type": str, always "edge_on_face".
-        - "points": list of dicts with "type" ("edge", "face", or "vertex") and "points" (coordinates).
+        - "elements": list of dicts with "type" ("edge", "face", or "vertex") and "points" (coordinates).
         - "severity": str, always "high".
     """
     standardized = []
@@ -254,8 +252,7 @@ def convert_intersections_to_standard_format(intersections: List[Dict[str, Any]]
             }
         ]
         standardized.append({
-            "type": "edge_on_face",
-            "points": points,
+            "elements": points,
             "severity": "high"
         })
     return standardized

@@ -4,6 +4,7 @@ from app.models.Geometry import Geometry
 from app.models.Material import Material
 from app.models.Mesh import Mesh
 from app.models.Model import Model
+from app.models.ModelIssue import ModelIssue
 from app.models.Project import Project
 from app.models.Simulation import Simulation
 from app.models.SimulationRun import SimulationRun

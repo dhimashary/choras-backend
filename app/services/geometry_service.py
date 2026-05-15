@@ -10,7 +10,7 @@ import rhino3dm
 from flask_smorest import abort
 
 from app.services.geometry_inspection_service import detect_boundary_edges, detect_degenerate_faces, detect_duplicate_vertices, detect_possible_holes_from_faces, detect_segment_facet_intersections_cdt, detect_t_junctions_from_facerecords_global_plc, inspect_face_planarity_issues
-from app.services.geometry_export_service import export_processed_topology_to_gmsh_geo, export_processed_topology_to_obj
+from app.services.geometry_export_service import export_processed_topology_to_gmsh_geo, export_processed_topology_to_obj, export_geometry_issues_to_json
 from app.services.geometry_diagnostic_log_service import append_repair_report, build_issue_detection_report, build_revalidation_report, build_topology_report, convert_intersections_to_standard_format, convert_tjunctions_to_standard_format, create_geometry_processing_report, log_topology, write_geometry_processing_report
 from app.services.geometry_parsing_service import extract_rhino_materials, process_and_instantiate_faces, parse_obj_file, deduplicate_vertices
 from app.services.geometry_repair_service import fix_t_junctions_iterative, flip_all_faces_if_majority_inward, remove_degenerate_faces, repair_plc_by_offset_iterative, repair_plc_single_splits_iterative, sort_vertices_deterministically, trim_segment_face_intersections_iterative
@@ -19,8 +19,8 @@ from app.db import db
 from app.factory.geometry_converter_factory.GeometryConversionFactory import (
     GeometryConversionFactory,
 )
-from app.models import File, Geometry, Task
-from app.types import Status, TaskType
+from app.models import File, Geometry, Task, Model, ModelIssue
+from app.types import Status, TaskType, DetectionStage
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 def get_geometry_by_id(geometry_id):
     results = Geometry.query.filter_by(id=geometry_id).first()
     return results
-
 
 def start_geometry_check_task(file_upload_id, use_geometry_pipeline):
     """
@@ -48,18 +47,15 @@ def start_geometry_check_task(file_upload_id, use_geometry_pipeline):
 
         db.session.add(geometry)
         db.session.commit()
-
         result = map_to_3dm_and_geo(geometry.id, use_geometry_pipeline)
         if not result:
             task.status = Status.Error
             task.message = "An error is encountered during the geometry processing!"
             db.session.commit()
             abort(500, task.message)
-
         task.status = Status.Completed
 
-        db.session.commit()
-
+        db.session.commit()        
     except Exception as ex:
         db.session.rollback()
         task.status = Status.Error
@@ -67,13 +63,11 @@ def start_geometry_check_task(file_upload_id, use_geometry_pipeline):
         db.session.commit()
         logger.error(f"{task.message}: {ex}")
         abort(400, message=f"Can not start the geometry task! Error: {ex}")
-
+    
     return geometry
-
 
 def get_geometry_result(task_id):
     return Geometry.query.filter_by(taskId=task_id).first()
-
 
 def map_to_3dm_and_geo(geometry_id, use_geometry_pipeline):
     geometry = Geometry.query.filter_by(id=geometry_id).first()
@@ -126,25 +120,38 @@ def map_to_3dm_and_geo(geometry_id, use_geometry_pipeline):
 
     if config.FeatureToggle.is_enabled("enable_geo_conversion"):
         try:
-            if use_geometry_pipeline:
-                # repair the obj
-                repaired_obj_path, issue_report_path = generate_repaired_obj_and_issue_report(obj_path, rhino3dm_path, tol=1e-2, conformize_tol=None)
-                # recreate the 3dm from the repaired obj
-                if not conversion_strategy.generate_3dm(repaired_obj_path, rhino3dm_path):
-                    logger.error("Can not generate a 3dm file")
-                    return False
-                if not convert_repaired_obj_to_gmsh_geo(repaired_obj_path, geo_path, rhino3dm_path):
-                    logger.error("Can not generate a geo file")
-                    return False
+            if not obj_to_gmsh_geo_precise(obj_path, geo_path, rhino3dm_path):
+                logger.error("Can not generate a geo file")
+                return False
+            # if use_geometry_pipeline:
+            #     detected_geometry_issues = detect_geometry_issues(obj_path, rhino3dm_path)
                 
-                # create a zip file fromm the repaired version
-                with zipfile.ZipFile(zip_file_path, "w") as zipf:
-                    zipf.write(rhino3dm_path, arcname=f"{file_name}.3dm")   
-                logger.warning("Geometry pipeline is enabled, obj repaired and converted to geo with the pipeline.")    
-            else:
-                if not obj_to_gmsh_geo_precise(obj_path, geo_path, rhino3dm_path):
-                    logger.error("Can not generate a geo file")
-                    return False
+                # Save detected geometry issues to JSON file
+                # issue_report_path, issue_count = export_geometry_issues_to_json(detected_geometry_issues, obj_path)
+                                
+                # Commented out code for now, as we are still validating the repaired geometry and the report format. Will enable once the validation is done.
+                
+                # repair the obj
+                # repaired_obj_path, issue_report_path = generate_repaired_obj_and_issue_report(obj_path, rhino3dm_path, tol=1e-2, conformize_tol=None)
+                # # recreate the 3dm from the repaired obj
+                # if not conversion_strategy.generate_3dm(repaired_obj_path, rhino3dm_path):
+                #     logger.error("Can not generate a 3dm file")
+                #     return False
+                # if not convert_repaired_obj_to_gmsh_geo(repaired_obj_path, geo_path, rhino3dm_path):
+                #     logger.error("Can not generate a geo file")
+                #     return False
+                
+                # create a zip file from the repaired version
+                # with zipfile.ZipFile(zip_file_path, "w") as zipf:
+                #     zipf.write(rhino3dm_path, arcname=f"{file_name}.3dm")   
+                # logger.warning("Geometry pipeline is enabled, obj repaired and converted to geo with the pipeline.")    
+            #     return True, model_issue.id
+            # else:
+            #     if not obj_to_gmsh_geo_precise(obj_path, geo_path, rhino3dm_path):
+            #         logger.error("Can not generate a geo file")
+            #         return False, None
+            #     else:
+            #         return True, None
 
             file_geo = File(fileName=f"{file_name}.geo")
             db.session.add(file_geo)
@@ -156,7 +163,6 @@ def map_to_3dm_and_geo(geometry_id, use_geometry_pipeline):
             return False
 
     return True
-
 
 def convert_3dm_to_geo(
     rhino_file_path, geo_file_path, volume_name="RoomVolume", map_materials=True
@@ -1161,7 +1167,7 @@ def detect_geometry_issues(obj_file, rhino3dm_path, tol=1e-2, conformize_tol=Non
     vertices, raw_faces, face_groups, face_group_materials = parse_obj_file(obj_file)
 
     duplicate_reports = detect_duplicate_vertices(vertices, tol)
-    
+
     # deduplication is needed to avoid false positives in downstream checks
     unique_vertices, orig_to_unique = deduplicate_vertices(vertices, tol)
 
@@ -1206,6 +1212,7 @@ def detect_geometry_issues(obj_file, rhino3dm_path, tol=1e-2, conformize_tol=Non
     )
     intersection_report = convert_intersections_to_standard_format(plc_hits)
     issue_detection_report = {
+        "duplicate_vertices": duplicate_reports,
         "non_coplanar_faces": problematic_faces,
         "T-junctions": tjs_report,
         "possible_holes": detect_possible_holes_from_faces(faces, unique_vertices),
@@ -1406,6 +1413,7 @@ def convert_repaired_obj_to_gmsh_geo(repaired_obj_path, geo_file, rhino3dm_path,
             for i in range(3)
         )
         flip_all_faces_if_majority_inward(faces, vertices, room_center, logger=logger)
+        # Save detected geometry issues to JSON file
         num_lines, num_surfaces = export_processed_topology_to_gmsh_geo(faces, vertices, geo_file, volume_name)
         return num_lines, num_surfaces
     except Exception as ex:

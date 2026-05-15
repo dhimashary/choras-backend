@@ -181,3 +181,56 @@ def export_faces_to_json(faces, filepath):
         json.dump(data, fp, indent=2)
 
     print(f"[DEBUG] Exported {len(faces)} faces → {filepath}")
+
+def export_geometry_issues_to_json(
+    detected_geometry_issues: Dict[str, Any],
+    obj_file_path: str
+) -> Tuple[str, int]:
+    """
+    Export detected geometry issues to a JSON file for diagnostic purposes.
+
+    This function saves the comprehensive geometry inspection results (including
+    duplicate vertices, T-junctions, possible holes, boundary edges, degenerate
+    faces, and intersections) to a JSON file. The file is named by replacing
+    the '.obj' extension of the input OBJ file with '_issues.json'.
+
+    Additionally, calculates the total issue count by summing the lengths of
+    all list values in the issues dictionary.
+
+    Parameters
+    ----------
+    detected_geometry_issues : Dict[str, Any]
+        Dictionary containing the results from geometry inspection functions.
+        Expected keys include:
+        - "duplicate_vertices": List of duplicate vertex reports
+        - "non_coplanar_faces": List of planarity issue reports
+        - "T-junctions": List of T-junction reports
+        - "possible_holes": List of hole detection reports
+        - "boundary_edges": List of boundary edge reports
+        - "degenerate_faces": List of degenerate face reports
+        - "intersections": List of intersection reports
+    obj_file_path : str
+        Path to the original OBJ file. Used to derive the output JSON file path.
+
+    Returns
+    -------
+    Tuple[str, int]
+        (Path to the created JSON file, total issue count)
+
+    Notes
+    -----
+    - The JSON file is saved with indentation for readability.
+    - Logs an info message upon successful export.
+    - If the OBJ file path does not end with '.obj', the replacement may not work as expected.
+    """
+    issue_count = 0
+    for value in detected_geometry_issues.values():
+        if isinstance(value, list):
+            issue_count += len(value)
+    
+    issues_json_path = obj_file_path.replace('.obj', '_issues.json')
+    
+    with open(issues_json_path, 'w') as f:
+        json.dump(detected_geometry_issues, f, indent=2)
+        
+    return issues_json_path, issue_count

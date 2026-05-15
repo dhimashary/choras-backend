@@ -34,11 +34,13 @@ def inspect_face_planarity_issues(
     -------
     List[Dict[str, Any]]
         List of dictionaries containing problematic faces:
-        - "type": str - always "face"
-        - "points": list[list[float]] - list of [x, y, z] coordinates for the face vertices
+        - "elements": dict with:
+            - "type": str - always "face"
+            - "points": list[list[float]] - list of [x, y, z] coordinates for the face vertices
         - "severity": str - "medium" for warning, "high" for fatal
-        - "worst_vertex_deviation": float - maximum distance from plane in meters
-        - "overall_spread_deviation": float - RMS distance from plane in meters
+        - "details": dict with:
+            - "worst_vertex_deviation": float - maximum distance of any vertex from the best-fit plane in meters
+            - "overall_spread_deviation": float - RMS distance of vertices from the best-fit plane in meters
     """
     problematic_faces = []
 
@@ -57,11 +59,15 @@ def inspect_face_planarity_issues(
             severity = "medium" if status == "warning" else "high"
 
             face_info = {
-                "type": "face",
-                "points": [[coord[0], coord[1], coord[2]] for coord in coordinates],
+                "elements": {
+                    "type": "face",
+                    "points": [[coord[0], coord[1], coord[2]] for coord in coordinates]
+                },
                 "severity": severity,
-                "worst_vertex_deviation": max_dist_m,
-                "overall_spread_deviation": rms_dist_m,
+                "details": {
+                    "worst_vertex_deviation": max_dist_m,
+                    "overall_spread_deviation": rms_dist_m
+                }
             }
             problematic_faces.append(face_info)
 
@@ -90,8 +96,9 @@ def detect_boundary_edges(
     -------
     list[dict]
         Standardized list of boundary edges. Each entry is a dict with:
-        - "type": str - always "edge"
-        - "points": list[list[float]] - list of two [x, y, z] coordinates for the edge endpoints
+        - "elements": list[dict] - list of one dict with:
+            - "points": list[list[float]] - list of two [x, y, z] coordinates for the edge endpoints
+            - "type": str - always "edge"
         - "severity": str - always "medium"
 
     Notes
@@ -118,8 +125,10 @@ def detect_boundary_edges(
             coord_a = unique_vertices[a - 1]
             coord_b = unique_vertices[b - 1]
             boundary_edges.append({
-                "type": "edge",
-                "points": [[coord_a[0], coord_a[1], coord_a[2]], [coord_b[0], coord_b[1], coord_b[2]]],
+                "elements": {
+                    "type": "edge",
+                    "points": [[coord_a[0], coord_a[1], coord_a[2]], [coord_b[0], coord_b[1], coord_b[2]]]   
+                },
                 "severity": "medium"
             })
 
@@ -149,12 +158,10 @@ def detect_degenerate_faces(
     -------
     list[dict]
         Standardized list of degenerate faces. Each entry is a dict with:
-        - "type": str - always "face"
-        - "points": list[list[float]] - list of [x, y, z] coordinates for the face vertices
+        - "elements": list[dict] - list of one dict with:
+            - "type": str - always "face"
+            - "points": list[list[float]] - list of [x, y, z] coordinates for the face vertices
         - "severity": str - always "high"
-        - "fid": int - face id
-        - "area2": float - area squared proxy
-        - "fatal_tol": float - tolerance used
 
     Notes
     -----
@@ -172,12 +179,11 @@ def detect_degenerate_faces(
         if status == "fatal":
             coordinates = [unique_vertices[vid - 1] for vid in f.verts]
             degenerate_faces.append({
-                "type": "face",
-                "points": [[coord[0], coord[1], coord[2]] for coord in coordinates],
+                "elements": {
+                    "type": "face",
+                    "points": [[coord[0], coord[1], coord[2]] for coord in coordinates]
+                },
                 "severity": "high",
-                # "fid": f.fid,
-                # "area2": area2,
-                # "fatal_tol": fatal_area2_tol,
             })
 
     return degenerate_faces
@@ -251,8 +257,9 @@ def detect_possible_holes_from_faces(
     -------
     list[dict]
         Standardized list of detected boundary loops. Each entry is a dict with:
-        - "type": str - always "edge_loop"
-        - "points": list[dict] - list of edge dicts, each with "type": "edge" and "points": list of two [x, y, z] coordinates
+        - "elements": list[dict] - list of dicts with:
+            - "type": str - always "edge"
+            - "points": list[list[float]] - list of two [x, y, z] coordinates for the edge endpoints
         - "severity": str - always "high"
 
     Notes
@@ -329,16 +336,15 @@ def detect_possible_holes_from_faces(
             # Close the loop
             edge_loop.append((unique_vertices[prev_v - 1], unique_vertices[cur_v - 1]))
             
-            points = []
+            elements = []
             for edge in edge_loop:
-                points.append({
+                elements.append({
                     "type": "edge",
                     "points": [list(edge[0]), list(edge[1])]
                 })
             
             loops.append({
-                "type": "edge_loop",
-                "points": points,
+                "elements": elements,
                 "severity": "high"
             })
 
@@ -533,8 +539,9 @@ def detect_duplicate_vertices(vertices: List[Tuple[float, float, float]], tol: f
     -------
     list[dict]
         List of dictionaries containing duplicate vertices:
-        - "type": str - always "vertex"
-        - "points": list[list[float]] - list containing one sublist [x, y, z] of the vertex coordinates
+        - "elements": list[dict] - list of dicts with:
+            - "type": str - always "vertex"
+            - "points": list[list[float]] - list containing one sublist [x, y, z] of the vertex coordinates
         - "severity": str - always "high"
     """
     unique_vertices = []
@@ -569,8 +576,10 @@ def detect_duplicate_vertices(vertices: List[Tuple[float, float, float]], tol: f
             for orig in sorted(origs):
                 coord = vertices[orig - 1]
                 duplicate_reports.append({
-                    "type": "vertex",
-                    "points": [[coord[0], coord[1], coord[2]]],
+                    "elements": {
+                        "type": "vertex",
+                        "points": [[coord[0], coord[1], coord[2]]]
+                    },
                     "severity": "medium"
                 })
 

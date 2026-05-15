@@ -7,7 +7,10 @@ from flask_smorest import abort
 from werkzeug.utils import secure_filename
 
 from app.db import db
-from app.models import Model
+from app.models import Model, File, ModelIssue
+from app.types import DetectionStage
+from app.services.geometry_service import detect_geometry_issues
+from app.services.geometry_export_service import export_geometry_issues_to_json
 from config import FeatureToggle, DefaultConfig
 from datetime import datetime
 
@@ -23,6 +26,8 @@ def create_new_model(model_data):
         outputFileId=model_data["sourceFileId"],
         imagePath=model_data["imagePath"] if "imagePath" in model_data else None,
     )
+    
+    
 
     if FeatureToggle.is_enabled("enable_geo_conversion"):
         new_model.hasGeo = True
@@ -30,6 +35,30 @@ def create_new_model(model_data):
     try:
         db.session.add(new_model)
         db.session.commit()
+
+        # Detect geometry issues and store in ModelIssue
+        directory = DefaultConfig.UPLOAD_FOLDER
+        file = File.query.filter_by(id=model_data["sourceFileId"]).first()
+        if file:
+            file_name, file_extension = os.path.splitext(os.path.basename(file.fileName))
+            obj_path = os.path.join(directory, f"{file_name}.obj")
+            rhino3dm_path = os.path.join(directory, f"{file_name}.3dm")
+
+            try:
+                detected_geometry_issues = detect_geometry_issues(obj_path, rhino3dm_path)
+                issue_report_path, issue_count = export_geometry_issues_to_json(detected_geometry_issues, obj_path)
+
+                model_issue = ModelIssue(
+                    modelId=new_model.id,
+                    fileName=f"{file_name}_issues.json",
+                    issueCount=issue_count,
+                    detectionStage=DetectionStage.AfterUpload
+                )
+                
+                db.session.add(model_issue)
+                db.session.commit()
+            except Exception as ex:
+                logger.warning(f"Failed to detect geometry issues for model {new_model.id}: {ex}")
 
     except Exception as ex:
         db.session.rollback()
