@@ -17,8 +17,6 @@ class GeometrySchema(Schema):
 
 class GeometryStartQuerySchema(Schema):
     fileUploadId = fields.Number(required=True)
-    useGeometryPipeline = fields.Boolean(required=True)
-
 
 class GeometryGetQuerySchema(Schema):
     geometryCheckId = fields.Integer(required=True)

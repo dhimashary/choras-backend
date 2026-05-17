@@ -30,13 +30,12 @@ def get_geometry_by_id(geometry_id):
     results = Geometry.query.filter_by(id=geometry_id).first()
     return results
 
-def start_geometry_check_task(file_upload_id, use_geometry_pipeline):
+def start_geometry_check_task(file_upload_id):
     """
     This function is a wrapper over 3dm mapper. It creates a task and geometry given a file upload id.
     Then calls the map_to_3dm function to map the given geometry file format to a rhino model.
 
     :param file_upload_id: represents an id related to the uploaded file
-    :param use_geometry_pipeline: boolean indicating whether to use the geometry pipeline for the conversion
     :return: Geometry: returns an object of Geometry model corresponding to the uploaded file
     """
     try:
@@ -47,7 +46,7 @@ def start_geometry_check_task(file_upload_id, use_geometry_pipeline):
 
         db.session.add(geometry)
         db.session.commit()
-        result = map_to_3dm_and_geo(geometry.id, use_geometry_pipeline)
+        result = map_to_3dm_and_geo(geometry.id)
         if not result:
             task.status = Status.Error
             task.message = "An error is encountered during the geometry processing!"
@@ -69,7 +68,7 @@ def start_geometry_check_task(file_upload_id, use_geometry_pipeline):
 def get_geometry_result(task_id):
     return Geometry.query.filter_by(taskId=task_id).first()
 
-def map_to_3dm_and_geo(geometry_id, use_geometry_pipeline):
+def map_to_3dm_and_geo(geometry_id):
     geometry = Geometry.query.filter_by(id=geometry_id).first()
     file = File.query.filter_by(id=geometry.inputModelUploadId).first()
     task = Task.query.filter_by(id=geometry.taskId).first()
