@@ -878,6 +878,67 @@ def _run_new_pipeline_for_obj(
     return True
 
 
+def _run_inspect_pipeline_for_obj(
+    obj_file: str,
+    report_file: str,
+) -> str:
+    """Run the inspect-only profile and write the API-shaped JSON report.
+
+    Returns the report path. Does NOT emit OBJ/GEO — the inspect profile
+    has no geometry exporters.
+    """
+    import json as _json
+    import logging as _logging
+    from pathlib import Path as _Path
+
+    from app.geometry.context import Context as _Context
+    from app.geometry.io.importers.obj import ObjImporter as _ObjImporter
+    from app.geometry.io.inspect_report import to_inspect_report as _to_inspect_report
+    from app.geometry.pipeline import run_pipeline as _run_pipeline
+    from app.geometry.profiles.wave_based import (
+        wave_based_inspect_profile as _wave_based_inspect_profile,
+    )
+    from app.geometry.tolerances import Tolerances as _Tolerances
+
+    geom = _ObjImporter().load(_Path(obj_file))
+    profile = _wave_based_inspect_profile()
+    ctx = _Context(
+        tolerances=_Tolerances(),
+        logger=_logging.getLogger("geometry.pipeline"),
+        profile_name=profile.name,
+    )
+
+    report_path = _Path(report_file)
+    result = _run_pipeline(geom, profile, report_path, ctx)
+    payload = _to_inspect_report(result)
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(_json.dumps(payload, indent=2, default=str))
+    return report_file
+
+
+def run_inspect_for_file_upload(file_upload_id: int) -> dict:
+    """Resolve the OBJ for a File row, run the inspect pipeline, return JSON."""
+    from config import DefaultConfig
+
+    file = File.query.filter_by(id=file_upload_id).first()
+    if file is None:
+        abort(404, message=f"File {file_upload_id} not found")
+
+    directory = DefaultConfig.UPLOAD_FOLDER
+    file_name, _ = os.path.splitext(os.path.basename(file.fileName))
+    obj_path = os.path.join(directory, f"{file_name}.obj")
+    report_path = os.path.join(directory, f"{file_name}_inspect_report.json")
+
+    if not os.path.exists(obj_path):
+        abort(400, message=f"OBJ not found for file {file_upload_id} at {obj_path}")
+
+    _run_inspect_pipeline_for_obj(obj_path, report_path)
+
+    with open(report_path, "r") as fp:
+        return json.load(fp)
+
+
 def obj_to_gmsh_geo_precise_with_repair_pipeline(
     obj_file,
     geo_file,

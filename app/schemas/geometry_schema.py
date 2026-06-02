@@ -24,3 +24,7 @@ class GeometryGetQuerySchema(Schema):
 
 class GeometryResultQuerySchema(Schema):
     taskId = fields.Integer(required=True)
+
+
+class GeometryInspectQuerySchema(Schema):
+    fileUploadId = fields.Integer(required=True)

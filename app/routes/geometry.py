@@ -1,8 +1,10 @@
+from flask import jsonify
 from flask.views import MethodView
 from flask_smorest import Blueprint
 
 from app.schemas.geometry_schema import (
     GeometryGetQuerySchema,
+    GeometryInspectQuerySchema,
     GeometryResultQuerySchema,
     GeometrySchema,
     GeometryStartQuerySchema,
@@ -34,3 +36,17 @@ class Geometry(MethodView):
     def get(self, query_data):
         result = geometry_service.get_geometry_result(query_data["taskId"])
         return result
+
+
+@blp.route("/geometryCheck/inspect")
+class GeometryInspect(MethodView):
+    @blp.arguments(GeometryInspectQuerySchema, location="query")
+    def post(self, query_data):
+        """Run the inspect-only pipeline (detect → diagnostic JSON, no GEO/OBJ).
+
+        Returns the issue report verbatim. No response schema is attached
+        because the top-level keys are dynamic (one per issue kind that
+        actually fired) and Marshmallow ``dump`` would strip them.
+        """
+        report = geometry_service.run_inspect_for_file_upload(query_data["fileUploadId"])
+        return jsonify(report)
