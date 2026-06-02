@@ -45,6 +45,15 @@ def inspect_face_planarity_issues(
     problematic_faces = []
 
     for face in faces:
+        # Degenerate faces (e.g., <3 effective points, repeated points, zero area)
+        # should be reported by degenerate-face checks, not as non-coplanar.
+        degeneracy_status, _ = classify_face_degeneracy(
+            face.verts,
+            unique_vertices,
+        )
+        if degeneracy_status == "fatal":
+            continue
+
         status, max_dist_m, rms_dist_m = classify_face_planarity_m(
             face.verts,
             unique_vertices,
@@ -236,12 +245,11 @@ def detect_possible_holes_from_faces(
     """
     Detect possible holes in a model using only face topology.
 
-    A "possible hole" here means a closed loop of boundary edges that is
-    supported by more than one adjacent face overall.
+    A "possible hole" here means a closed loop of boundary edges.
 
     Boundary edges are edges that belong to exactly one face. Loops that are
-    contributed by only a single face are usually just open face perimeters,
-    not real hole candidates, so they are filtered out.
+    contributed by only a single face are now also reported, since they can
+    still represent a real opening in the surface.
 
     This implementation finds all connected components of boundary edges
     and identifies those that form simple cycles (each vertex has degree 2).
@@ -313,12 +321,6 @@ def detect_possible_holes_from_faces(
         if all(len(adj[v]) == 2 for v in comp):
             comp_boundary_edges = [e for e in boundary_edges if e[0] in comp and e[1] in comp]
             adjacent_face_fids = sorted({fid for e in comp_boundary_edges for fid in edge_to_faces[e]})
-
-            # Real hole candidates should be bounded by more than one face.
-            # A loop formed entirely from one face is typically just an open
-            # perimeter of that face, not a hole in the surface.
-            if len(adjacent_face_fids) < 2:
-                continue
 
             # Traverse the cycle
             start_v = min(comp)

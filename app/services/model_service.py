@@ -1,6 +1,8 @@
 import logging
 import os
 import uuid
+import zipfile
+from app.factory.geometry_converter_factory.GeometryConversionFactory import GeometryConversionFactory
 import config
 
 from flask_smorest import abort
@@ -9,7 +11,7 @@ from werkzeug.utils import secure_filename
 from app.db import db
 from app.models import Model, File, ModelIssue
 from app.types import DetectionStage
-from app.services.geometry_service import detect_geometry_issues
+from app.services.geometry_service import convert_repaired_obj_to_gmsh_geo, detect_geometry_issues, generate_repaired_obj_and_issue_report
 from app.services.geometry_export_service import export_geometry_issues_to_json
 from config import FeatureToggle, DefaultConfig
 from datetime import datetime
@@ -43,11 +45,12 @@ def create_new_model(model_data):
             file_name, file_extension = os.path.splitext(os.path.basename(file.fileName))
             obj_path = os.path.join(directory, f"{file_name}.obj")
             rhino3dm_path = os.path.join(directory, f"{file_name}.3dm")
+            geo_path = os.path.join(directory, f"{file_name}.geo")
+            zip_file_path = os.path.join(directory, f"{file_name}.zip")
 
             try:
                 detected_geometry_issues = detect_geometry_issues(obj_path, rhino3dm_path)
                 issue_report_path, issue_count = export_geometry_issues_to_json(detected_geometry_issues, obj_path)
-
                 model_issue = ModelIssue(
                     modelId=new_model.id,
                     fileName=f"{file_name}_issues.json",
@@ -57,6 +60,23 @@ def create_new_model(model_data):
                 
                 db.session.add(model_issue)
                 db.session.commit()
+                logger.warning(f"Geometry issues detected for model {new_model.id}: {issue_count} issues found. Issue report generated at: {issue_report_path}")
+                conversion_factory = GeometryConversionFactory()
+                conversion_strategy = conversion_factory.create_strategy('.obj')
+                
+                repaired_obj_path, issue_report_path = generate_repaired_obj_and_issue_report(obj_path, rhino3dm_path, tol=1e-2, conformize_tol=None)
+                logger.warning(f"Repaired OBJ file generated at: {repaired_obj_path}")
+                if not conversion_strategy.generate_3dm(repaired_obj_path, rhino3dm_path):
+                    logger.error("Can not generate a 3dm file")
+                    return False
+                logger.warning(f"Generated .geo file at: {geo_path}")
+                if not convert_repaired_obj_to_gmsh_geo(repaired_obj_path, geo_path, rhino3dm_path):
+                    logger.error("Can not generate a geo file")
+                    return False
+                
+                # create a zip file from the repaired version
+                with zipfile.ZipFile(zip_file_path, "w") as zipf:
+                    zipf.write(rhino3dm_path, arcname=f"{file_name}.3dm") 
             except Exception as ex:
                 logger.warning(f"Failed to detect geometry issues for model {new_model.id}: {ex}")
 
