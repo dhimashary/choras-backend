@@ -1,0 +1,218 @@
+@startuml class
+title CHORAS Geometry Pipeline — Class / Type Model
+
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+hide empty members
+
+' --- Intermediate Representation (tagged union) ---
+package ir {
+  interface Geometry <<Protocol>> {
+    +kind : ClassVar[str]
+  }
+  class Mesh {
+    +kind = "mesh"
+    +vertices : list<Vertex>
+    +faces    : list<Face>
+  }
+  class BRep {
+    +kind = "brep"
+    +curves   : list<Curve>
+    +surfaces : list<Surface>
+  }
+  class PointCloud {
+    +kind = "pointcloud"
+    +points : list<Vertex>
+  }
+  Geometry <|.. Mesh
+  Geometry <|.. BRep
+  Geometry <|.. PointCloud
+}
+
+' --- Issue model ---
+package issues {
+  enum IssueKind {
+    DUPLICATE_VERTEX
+    DEGENERATE_FACE
+    NON_PLANAR_FACE
+    T_JUNCTION
+    INTERSECTION
+    BOUNDARY_EDGE
+    POSSIBLE_HOLE
+    INVERTED_NORMAL
+  }
+  enum Severity {
+    WARN
+    FATAL
+  }
+  enum DetectionStage {
+    PRE
+    POST_STAGE
+    FINAL
+  }
+
+  class Issue <<frozen>> {
+    +id : str           ' stable sha1(kind+payload)
+    +kind : IssueKind
+    +severity : Severity
+    +stage : DetectionStage
+    +stage_name : str
+    +payload : dict
+    +{static} create(kind, severity, stage, stage_name, payload) : Issue
+  }
+  Issue --> IssueKind
+  Issue --> Severity
+  Issue --> DetectionStage
+}
+
+' --- Strategies ---
+package validators {
+  interface Validator <<Protocol>> {
+    +name : ClassVar[str]
+    +accepts : ClassVar[set<str>]
+    +kind    : ClassVar[IssueKind]
+    +detect(geom, ctx) : list<Issue>
+  }
+}
+
+package repairs {
+  interface RepairStep <<Protocol>> {
+    +name : ClassVar[str]
+    +accepts : ClassVar[set<str>]
+    +handles : ClassVar[set<IssueKind>]
+    +apply(geom, issues, ctx) : (Geometry, RepairResult)
+  }
+  class FixTJunctionsIterative {
+    -detector : Validator
+    -max_iters : int
+  }
+  class TrimSegmentFaceIntersections {
+    -detector : Validator
+    -max_iters : int
+  }
+  RepairStep <|.. FixTJunctionsIterative
+  RepairStep <|.. TrimSegmentFaceIntersections
+  FixTJunctionsIterative      o--> Validator : detector
+  TrimSegmentFaceIntersections o--> Validator : detector
+}
+
+' --- IO ---
+package io {
+  interface Importer <<Protocol>> {
+    +extensions : ClassVar[tuple<str>]
+    +load(path) : Geometry
+  }
+  interface Exporter <<Protocol>> {
+    +extensions : ClassVar[tuple<str>]
+    +write(geom, path) : None
+  }
+  class ImporterRegistry {
+    +register(imp : Importer)
+    +get_for(ext : str) : Importer
+  }
+  class ExporterRegistry {
+    +register(exp : Exporter)
+    +get_for(ext : str) : Exporter
+  }
+  class ConverterRegistry {
+    +register(src, dst, fn)
+    +convert(geom, dst) : Geometry
+  }
+}
+
+' --- Profile / Stage ---
+package profile {
+  class Stage {
+    +name : str
+    +repairs : list<RepairStep>
+    +post_validators : list<Validator>
+    +fail_fast_on : set<IssueKind>
+  }
+  class SimulationProfile {
+    +name : str
+    +target_ir : type<Geometry>
+    +pre_validators : list<Validator>
+    +stages : list<Stage>
+    +final_validators : list<Validator>
+    +exporter : Exporter
+    +tolerances : Tolerances
+  }
+  SimulationProfile o-- "*" Stage : stages (ordered)
+  SimulationProfile o-- "*" Validator : pre + final
+  SimulationProfile o-- Exporter
+  Stage             o-- "*" RepairStep
+  Stage             o-- "*" Validator : post_validators
+}
+
+' --- Reporting ---
+package report {
+  class ValidationSnapshot {
+    +when : DetectionStage
+    +stage_name : str
+    +issues : list<Issue>
+  }
+  class RepairResult {
+    +step_name : str
+    +stage_name : str
+    +affected_ids : list<str>
+    +before_count : int
+    +after_count : int
+    +iterations : int
+    +details : dict
+  }
+  class RepairReport {
+    +results : list<RepairResult>
+  }
+  class PipelineResult {
+    +geometry : Geometry
+    +snapshots : list<ValidationSnapshot>
+    +repairs : RepairReport
+    +output_path : Optional<str>
+    +initial : Optional<ValidationSnapshot>
+    +final   : Optional<ValidationSnapshot>
+  }
+  class SnapshotDiff {
+    +fixed : list<Issue>
+    +introduced : list<Issue>
+    +remaining : list<Issue>
+  }
+  PipelineResult --> "*" ValidationSnapshot
+  PipelineResult --> RepairReport
+  RepairReport   --> "*" RepairResult
+  ValidationSnapshot --> "*" Issue
+}
+
+' --- Context / config ---
+package context {
+  class Tolerances <<frozen>> {
+    +vertex_merge : float
+    +planarity_warn_m : float
+    +planarity_fatal_m : float
+    +intersection_eps : float
+    +max_reports : int
+  }
+  class Context {
+    +tolerances : Tolerances
+    +logger
+    +profile_name : str
+    +extras : dict
+  }
+  Context --> Tolerances
+}
+
+' --- Orchestration ---
+class "pipeline" as PipelineMod <<module>> {
+  +run_pipeline(geom, profile, output_path, ctx) : PipelineResult
+  +run_validators(geom, vs, ctx, when, stage_name) : ValidationSnapshot
+  +run_stage(geom, stage, ctx, repair_report) : (Geometry, ValidationSnapshot)
+}
+class "diff" as DiffMod <<module>> {
+  +diff_snapshots(before, after) : SnapshotDiff
+}
+
+PipelineMod ..> SimulationProfile
+PipelineMod ..> ValidationSnapshot
+PipelineMod ..> Issue
+DiffMod    ..> SnapshotDiff
+
+@enduml

@@ -1,0 +1,77 @@
+@startuml activity
+title CHORAS Geometry Pipeline — Activity (run_pipeline)
+
+skinparam shadowing false
+skinparam ActivityDiamondBackgroundColor #FAFAFA
+
+start
+:receive (geom, profile, output_path, ctx);
+
+if (geom.kind == profile.target_ir.kind?) then (yes)
+else (no)
+  :ConverterRegistry.convert(geom, profile.target_ir);
+endif
+
+partition "PRE detection" {
+  :run_validators(profile.pre_validators, when=PRE);
+  :append ValidationSnapshot #0 (PRE);
+}
+
+if (any FATAL issues whose kind in any\nstage.fail_fast_on?) then (yes)
+  :build PipelineResult\n(no repairs run);
+  stop
+endif
+
+partition "Staged repairs" {
+  :prev_snapshot = snapshots[-1];
+
+  while (more stages?) is (yes)
+    :stage = next(stages);
+
+    partition "stage.repairs (ordered)" {
+      while (more repairs in stage?) is (yes)
+        :repair = next(stage.repairs);
+        if (repair is iterative?) then (yes)
+          repeat
+            :repair.detector.detect();
+            if (issues empty\nOR iters >= max_iters?) then (stop)
+              break
+            endif
+            :repair.apply() on detected issues;
+          repeat while (continue) is (loop) not (exit)
+        else (no)
+          :repair.apply(geom, issues_for_kind, ctx);
+        endif
+        :record RepairResult\n(step_name, stage_name,\n affected_ids, iterations);
+      endwhile (no)
+    }
+
+    :run_validators(stage.post_validators,\n  when=POST_STAGE,\n  stage_name=stage.name);
+    :append ValidationSnapshot #i;
+
+    :diff = diff_snapshots(prev_snapshot, current);
+
+    if (diff.introduced contains kinds in\nstage.fail_fast_on?) then (yes)
+      :mark pipeline as failed;
+      break
+    endif
+    :prev_snapshot = current;
+  endwhile (no)
+}
+
+partition "FINAL detection" {
+  :run_validators(profile.final_validators,\n  when=FINAL);
+  :append ValidationSnapshot #FINAL;
+}
+
+if (any FATAL in FINAL snapshot?) then (yes)
+  :do NOT export;
+  :return PipelineResult(snapshots, repairs,\n  output_path=None);
+  stop
+else (no)
+  :profile.exporter.write(geom, output_path);
+  :return PipelineResult(geom, snapshots,\n  repairs, output_path);
+  stop
+endif
+
+@enduml

@@ -1,0 +1,132 @@
+@startuml component
+title CHORAS Geometry Pipeline — Component View
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultTextAlignment center
+
+package "Flask backend (adapter layer)" as flask {
+  [HTTP routes] as Routes
+  [geometry_service.py] as Service
+  database "SQLAlchemy models" as DB
+  folder "uploads/" as Uploads
+}
+
+package "app.geometry  (hexagonal core, no Flask/DB imports)" as core {
+
+  package "io" as IO {
+    component "ImporterRegistry" as ImpReg
+    package "importers" {
+      [ObjImporter]
+      [DxfImporter]
+      [Rhino3dmImporter]
+    }
+    component "ExporterRegistry" as ExpReg
+    package "exporters" {
+      [GmshGeoExporter]
+      [ObjExporter]
+    }
+  }
+
+  package "ir  (tagged union)" as IR {
+    [Mesh]
+    [BRep]
+    [PointCloud]
+  }
+
+  package "converters" as CONV {
+    [ConverterRegistry]
+    [BRep -> Mesh]
+  }
+
+  package "validators" as V {
+    [DuplicateVertices]
+    [DegenerateFaces]
+    [NonPlanarFaces]
+    [TJunctions]
+    [SegmentFacetIntersections]
+    [BoundaryEdges]
+    [PossibleHoles]
+  }
+
+  package "repairs" as R {
+    [DeduplicateVertices]
+    [RemoveDegenerateFaces]
+    [SortVertices]
+    [FlipFacesIfMajorityInward]
+    [FixTJunctionsIterative]
+    [TrimSegmentFaceIntersections]
+    [RepairPlcSingleSplits]
+  }
+
+  package "kernel  (pure geometry helpers)" as K {
+    [edges]
+    [planarity]
+    [adjacency]
+    [orientation]
+    [topology]
+    [tolerances_math]
+  }
+
+  package "profiles" as P {
+    [wave_based_profile]
+    [ray_tracing_profile]
+  }
+
+  [pipeline.run_pipeline] as Pipeline
+  [diff.diff_snapshots]   as Diff
+  [report]                as Report
+  [issues]                as Issues
+  [context]               as Ctx
+  [tolerances]            as Tol
+}
+
+package "third-party Python libs" as ext {
+  [trimesh]
+  [pygmsh / gmsh]
+  [rhino3dm]
+  [ezdxf]
+  [numpy]
+  [pybind11 hotspot (future)] as Hot
+}
+
+Routes        --> Service
+Service       --> Pipeline : run_pipeline(geom, profile, ctx)
+Service       ..> DB
+Service       ..> Uploads
+
+Pipeline      --> ImpReg
+Pipeline      --> ExpReg
+Pipeline      --> CONV
+Pipeline      --> V
+Pipeline      --> R
+Pipeline      --> Report
+Pipeline      --> Issues
+
+P             --> V
+P             --> R
+P             --> ExpReg
+P             --> Tol
+
+V             --> K
+R             --> K
+R             ..> V : detector injection\n(iterative repairs)
+
+ImpReg        --> IR
+ExpReg        --> IR
+CONV          --> IR
+
+ObjImporter   ..> trimesh
+DxfImporter   ..> ezdxf
+Rhino3dmImporter ..> rhino3dm
+GmshGeoExporter  ..> "pygmsh / gmsh"
+K             ..> numpy
+K             ..> Hot
+
+note bottom of core
+  Import boundary (lint-enforced):
+  app.geometry.* must NOT import
+  app.models, app.db, or flask*
+end note
+
+@enduml
