@@ -16,6 +16,7 @@ class IssueKind(str, Enum):
     BOUNDARY_EDGE = "boundary_edge"
     POSSIBLE_HOLE = "possible_hole"
     INVERTED_NORMAL = "inverted_normal"
+    SMALL_FACE = "small_face"
 
 
 class Severity(str, Enum):

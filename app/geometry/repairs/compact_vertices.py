@@ -1,9 +1,4 @@
-"""Re-index vertices in a stable order to make output reproducible.
-
-Sorting is keyed on rounded coordinates (8 decimals) so that runs on the
-same input produce byte-identical Gmsh `.geo` output even when the
-original OBJ file ordering changes.
-"""
+"""Compact vertices: drop any not referenced by a face and remap indices."""
 from __future__ import annotations
 
 from typing import ClassVar
@@ -13,11 +8,11 @@ from app.geometry.ir import Mesh
 from app.geometry.issues import Issue, IssueKind
 from app.geometry.kernel import mesh_from_legacy, mesh_to_legacy
 from app.geometry.report import RepairResult
-from app.services.geometry_repair_service import sort_vertices_deterministically
+from app.services.geometry_repair_service import compact_vertices_and_remove_unused
 
 
-class SortVerticesDeterministicallyRepair:
-    name: ClassVar[str] = "sort_vertices_deterministically"
+class CompactVerticesRepair:
+    name: ClassVar[str] = "compact_vertices_and_remove_unused"
     accepts: ClassVar[set[str]] = {"mesh"}
     handles: ClassVar[set[IssueKind]] = set()
 
@@ -28,7 +23,7 @@ class SortVerticesDeterministicallyRepair:
         ctx: Context,
     ) -> tuple[Mesh, RepairResult]:
         faces, points = mesh_to_legacy(geom)
-        new_points, new_faces = sort_vertices_deterministically(points, faces)
+        new_faces, new_points, _changed, diag = compact_vertices_and_remove_unused(faces, points)
         new_mesh = mesh_from_legacy(new_faces, new_points, geom)
         result = RepairResult(
             step_name=self.name,
@@ -36,6 +31,6 @@ class SortVerticesDeterministicallyRepair:
             affected_ids=[],
             before_count=len(points),
             after_count=len(new_points),
-            details={},
+            details=dict(diag),
         )
         return new_mesh, result

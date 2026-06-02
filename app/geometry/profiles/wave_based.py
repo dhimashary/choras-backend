@@ -10,6 +10,7 @@ The stage order encodes geometric dependencies:
 from __future__ import annotations
 
 from app.geometry.io.exporters.geo import GmshGeoExporter
+from app.geometry.io.exporters.obj import ObjExporter
 from app.geometry.ir import Mesh
 from app.geometry.profile import SimulationProfile, Stage
 from app.geometry.repairs.deduplicate_vertices import DeduplicateVerticesRepair
@@ -25,15 +26,15 @@ from app.geometry.tolerances import Tolerances
 from app.geometry.validators.boundary_edges import BoundaryEdgesValidator
 from app.geometry.validators.degenerate_faces import DegenerateFacesValidator
 from app.geometry.validators.duplicate_vertices import DuplicateVerticesValidator
-from app.geometry.validators.intersections import SegmentFacetIntersectionsValidator
+from app.geometry.validators.intersections import IntersectionsValidator
 from app.geometry.validators.non_planar_faces import NonPlanarFacesValidator
 from app.geometry.validators.possible_holes import PossibleHolesValidator
 from app.geometry.validators.t_junctions import TJunctionsValidator
 
 
-def wave_based_profile() -> SimulationProfile:
+def wave_based_profile(volume_name: str = "RoomVolume") -> SimulationProfile:
     tjunc_validator = TJunctionsValidator()
-    intersect_validator = SegmentFacetIntersectionsValidator()
+    intersect_validator = IntersectionsValidator()
 
     return SimulationProfile(
         name="wave_based",
@@ -42,6 +43,10 @@ def wave_based_profile() -> SimulationProfile:
             DuplicateVerticesValidator(),
             DegenerateFacesValidator(),
             NonPlanarFacesValidator(),
+            tjunc_validator,
+            intersect_validator,
+            BoundaryEdgesValidator(),
+            PossibleHolesValidator(),
         ],
         stages=[
             Stage(
@@ -85,6 +90,9 @@ def wave_based_profile() -> SimulationProfile:
             BoundaryEdgesValidator(),
             PossibleHolesValidator(),
         ],
-        exporter=GmshGeoExporter(),
+        exporters=[
+            ObjExporter(),
+            GmshGeoExporter(volume_name=volume_name),
+        ],
         tolerances=Tolerances(),
     )

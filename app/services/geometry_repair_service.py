@@ -3239,6 +3239,8 @@ def classify_multi_hit_face_collinear(
 
             "reason": "need_at_least_2_points",
 
+            "max_dev": 0.0,
+
         }
 
     c, u, v, n = _face_plane_basis(face, points)
@@ -3284,6 +3286,8 @@ def classify_multi_hit_face_collinear(
             "is_collinear": False,
 
             "reason": "degenerate_points",
+
+            "max_dev": 0.0,
 
         }
 

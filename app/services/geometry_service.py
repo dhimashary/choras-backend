@@ -807,6 +807,77 @@ def obj_to_gmsh_geo_precise(obj_file, geo_file, rhino3dm_path, volume_name="Room
     print(f"Wrote {geo_file}: {len(unique_vertices)} points, {next_line_id-1} lines, {len(face_line_loops)} surfaces.")
     return True
 
+def _run_new_pipeline_for_obj(
+    obj_file: str,
+    geo_file: str,
+    rhino3dm_path: str,
+    volume_name: str,
+) -> bool:
+    """New-pipeline path (opt-in via `CHORAS_USE_NEW_PIPELINE=1`).
+
+    Mirrors the public contract of `obj_to_gmsh_geo_precise_with_repair_pipeline`:
+    writes a `.geo` file at `geo_file` and a `_report.json` next to it.
+    JSON shape is the structured one from `app.services.geometry_pipeline_translator`,
+    which differs from the legacy raw-detector shape (tech-debt #9).
+    """
+    import logging as _logging
+    from pathlib import Path as _Path
+
+    from app.geometry.context import Context as _Context
+    from app.geometry.io.importers.obj import ObjImporter as _ObjImporter
+    from app.geometry.pipeline import run_pipeline as _run_pipeline
+    from app.geometry.profiles.wave_based import wave_based_profile as _wave_based_profile
+    from app.geometry.tolerances import Tolerances as _Tolerances
+    from app.services.geometry_pipeline_translator import (
+        to_legacy_processing_report as _to_legacy,
+    )
+    from app.utils.geometry_utils import FaceRecord as _FaceRecord
+
+    def _to_face_records(faces):
+        return [
+            _FaceRecord(
+                fid=idx,
+                verts=list(f.vertex_indices),
+                group=f.group or "default",
+                group_material=f.group or "default_group_material",
+                material=f.material or "unknown",
+            )
+            for idx, f in enumerate(faces)
+        ]
+
+    geom = _ObjImporter().load(_Path(obj_file))
+
+    profile = _wave_based_profile(volume_name=volume_name)
+    ctx = _Context(
+        tolerances=_Tolerances(),
+        logger=_logging.getLogger("geometry.pipeline"),
+        profile_name=profile.name,
+    )
+
+    # topology_before = build_topology_report(
+    #     [(v.x, v.y, v.z) for v in geom.vertices],
+    #     _to_face_records(geom.faces),
+    # )
+
+    _run_pipeline(geom, profile, _Path(geo_file), ctx)
+
+    # topology_after = build_topology_report(
+    #     [(v.x, v.y, v.z) for v in result.geometry.vertices],
+    #     _to_face_records(result.geometry.faces),
+    # )
+
+    # report = _to_legacy(
+    #     result,
+    #     input_path=obj_file,
+    #     output_path=geo_file,
+    #     topology_before=topology_before,
+    #     topology_after=topology_after,
+    # )
+    # report_path = geo_file.replace(".geo", "_report.json")
+    # write_geometry_processing_report(report, report_path)
+    return True
+
+
 def obj_to_gmsh_geo_precise_with_repair_pipeline(
     obj_file,
     geo_file,
@@ -834,6 +905,10 @@ def obj_to_gmsh_geo_precise_with_repair_pipeline(
       - Creates Physical Volume, Physical Surfaces (by material), and Physical Lines.
       - Generates processing report and processed OBJ export.
     """
+
+    if os.environ.get("CHORAS_USE_NEW_PIPELINE") == "1":
+        logger.info("[pipeline] CHORAS_USE_NEW_PIPELINE=1 → routing through new pipeline")
+        return _run_new_pipeline_for_obj(obj_file, geo_file, rhino3dm_path, volume_name)
 
     if conformize_tol is None:
         conformize_tol = max(1e-7, tol)

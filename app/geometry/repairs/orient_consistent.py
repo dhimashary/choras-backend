@@ -1,8 +1,8 @@
-"""Global outward-normal repair.
+"""Make polygon winding globally consistent across shared edges.
 
-If more faces point toward the room centre than away, flip every face.
-Cheap and catches the common "OBJ exporter inverted everything" case.
-For local edge-by-edge consistency see ``orient_consistent.py``.
+For every manifold shared edge (used by exactly two faces), ensure the
+edge direction is opposite in the two faces. This is required for a
+valid PLC topology and for correct outward-normal computation downstream.
 """
 from __future__ import annotations
 
@@ -13,12 +13,11 @@ from app.geometry.ir import Mesh
 from app.geometry.issues import Issue, IssueKind
 from app.geometry.kernel import mesh_from_legacy, mesh_to_legacy
 from app.geometry.report import RepairResult
-from app.geometry.repairs.mesh_helpers import room_center_from_mesh
-from app.services.geometry_repair_service import flip_all_faces_if_majority_inward
+from app.services.geometry_repair_service import orient_faces_consistently_by_adjacency
 
 
-class FlipFacesIfMajorityInwardRepair:
-    name: ClassVar[str] = "flip_all_faces_if_majority_inward"
+class OrientFacesConsistentlyByAdjacencyRepair:
+    name: ClassVar[str] = "orient_faces_consistently_by_adjacency"
     accepts: ClassVar[set[str]] = {"mesh"}
     handles: ClassVar[set[IssueKind]] = {IssueKind.INVERTED_NORMAL}
 
@@ -29,10 +28,7 @@ class FlipFacesIfMajorityInwardRepair:
         ctx: Context,
     ) -> tuple[Mesh, RepairResult]:
         faces, points = mesh_to_legacy(geom)
-        room_center = room_center_from_mesh(geom)
-        flipped = flip_all_faces_if_majority_inward(
-            faces, points, room_center, logger=ctx.logger,
-        )
+        diag = orient_faces_consistently_by_adjacency(faces, logger=ctx.logger)
         new_mesh = mesh_from_legacy(faces, points, geom)
         result = RepairResult(
             step_name=self.name,
@@ -40,7 +36,6 @@ class FlipFacesIfMajorityInwardRepair:
             affected_ids=[i.id for i in issues if i.kind == IssueKind.INVERTED_NORMAL],
             before_count=len(faces),
             after_count=len(faces),
-            details={"flipped_all": bool(flipped), "room_center": list(room_center)},
+            details=dict(diag),
         )
         return new_mesh, result
-
