@@ -40,6 +40,7 @@ package issues {
     BOUNDARY_EDGE
     POSSIBLE_HOLE
     INVERTED_NORMAL
+    SMALL_FACE
   }
   enum Severity {
     WARN
@@ -103,8 +104,8 @@ package io {
     +load(path) : Geometry
   }
   interface Exporter <<Protocol>> {
-    +extensions : ClassVar[tuple<str>]
     +write(geom, path) : None
+    +path_for(base_path) : Path  ' optional hook
   }
   class ImporterRegistry {
     +register(imp : Importer)
@@ -134,12 +135,12 @@ package profile {
     +pre_validators : list<Validator>
     +stages : list<Stage>
     +final_validators : list<Validator>
-    +exporter : Exporter
+    +exporters : list<Exporter>
     +tolerances : Tolerances
   }
   SimulationProfile o-- "*" Stage : stages (ordered)
   SimulationProfile o-- "*" Validator : pre + final
-  SimulationProfile o-- Exporter
+  SimulationProfile o-- "*" Exporter
   Stage             o-- "*" RepairStep
   Stage             o-- "*" Validator : post_validators
 }

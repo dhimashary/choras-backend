@@ -31,10 +31,11 @@ box "app.geometry core" #EEF6FF
   participant "importer\n«interface»\n:Importer"     as Imp
   participant ":Pipeline"                            as Pipe
   participant "pre\n«interface»\n:Validator[*]"      as PreV
+  participant "final\n«interface»\n:Validator[*]"    as FinalV
   participant "stage_tj\n:Stage"                     as STJ
   participant "tj_repair\n«interface»\n:RepairStep"  as FixTJ
   participant "tj_detector\n«interface»\n:Validator" as VTJ
-  participant "exporter\n«interface»\n:Exporter"     as Exp
+  participant "exporters\n«interface»\n:Exporter[*]"  as Exp
 end box
 
 == upload ==
@@ -78,12 +79,15 @@ note over Pipe
 end note
 
 == final detection ==
-Pipe -> PreV : detect(geom, ctx)
-PreV --> Pipe : :ValidationSnapshot  (when=FINAL)
+Pipe -> FinalV : detect(geom, ctx)
+FinalV --> Pipe : :ValidationSnapshot  (when=FINAL)
 
 == export ==
-Pipe -> Exp : write(geom, output_path)
-Exp  --> Pipe : output_path
+loop for each exporter in profile.exporters
+  Pipe -> Exp : path_for(output_path)  (if defined)
+  Pipe -> Exp : write(geom, target)
+end
+Exp --> Pipe : (target paths)
 
 Pipe --> Service : :PipelineResult\n(snapshots[], repairs, output_path)
 

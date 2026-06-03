@@ -99,30 +99,63 @@ class RepairStep(Protocol):
     def apply(self, geom: Geometry, issues: list[Issue], ctx: Context) -> RepairResult: ...
 
 @dataclass
+class Stage:
+    name: str
+    repairs: list[RepairStep]            # ordered
+    post_validators: list[Validator]     # run after this stage's repairs
+    fail_fast_on: set[IssueKind]         # if any kind appears here, abort
+
+@dataclass
 class SimulationProfile:
     name: str
     target_ir: type[Geometry]
-    required_validators: list[Validator]
-    repair_plan: list[RepairStep]
-    exporter: Exporter
-    tolerances: Tolerances
+    pre_validators:   list[Validator]    # run once on the imported geometry
+    stages:           list[Stage]        # ordered repair-and-detect stages
+    final_validators: list[Validator]    # run once after the last stage
+    exporters:        list[Exporter]     # >= 0 outputs (e.g. .obj + .geo)
+    tolerances:       Tolerances
 ```
+
+`SimulationProfile.__post_init__` cross-checks every attached validator and
+repair against `target_ir.kind`, so a misconfigured profile fails at construction
+time rather than mid-pipeline.
 
 ### 3.3 Orchestration
 
 ```python
-def run_pipeline(geom: Geometry, profile: SimulationProfile) -> PipelineResult:
-    if not isinstance(geom, profile.target_ir):
+def run_pipeline(
+    geom: Geometry,
+    profile: SimulationProfile,
+    output_path: Path,
+    ctx: Context,
+) -> PipelineResult:
+    if geom.kind != profile.target_ir.kind:
         geom = ConverterRegistry.convert(geom, profile.target_ir)
-    initial = run_validators(geom, profile.required_validators)
-    geom, repair_report = run_repair(geom, profile.repair_plan, profile.required_validators)
-    final = run_validators(geom, profile.required_validators)
-    profile.exporter.write(geom, ...)
-    return PipelineResult(geom, initial, repair_report, final)
+
+    snapshots = [run_validators(geom, profile.pre_validators, ctx,
+                                when=PRE, stage_name="")]
+    repairs = RepairReport()
+
+    for stage in profile.stages:
+        geom, snap = run_stage(geom, stage, ctx, repairs, snapshots[-1].issues)
+        snapshots.append(snap)
+        # Per-stage fail_fast is enforced INSIDE run_stage (raises
+        # PipelineFailFastError); the profile decides which kinds qualify.
+
+    snapshots.append(run_validators(geom, profile.final_validators, ctx,
+                                    when=FINAL, stage_name=""))
+
+    for exporter in profile.exporters:
+        target = getattr(exporter, "path_for", lambda p: p)(output_path)
+        exporter.write(geom, target)
+
+    return PipelineResult(geom, snapshots, repairs, str(output_path))
 ```
 
 `geometry_service.py` is the only place that bridges this pipeline with
-SQLAlchemy models and HTTP responses.
+SQLAlchemy models and HTTP responses. Snapshot diffing
+(`diff.diff_snapshots`) lives outside `run_pipeline` and is invoked by the
+service when it builds the persisted report.
 
 ## 4. How Each Concern Is Addressed
 

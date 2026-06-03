@@ -17,14 +17,7 @@ partition "PRE detection" {
   :append ValidationSnapshot #0 (PRE);
 }
 
-if (any FATAL issues whose kind in any\nstage.fail_fast_on?) then (yes)
-  :build PipelineResult\n(no repairs run);
-  stop
-endif
-
 partition "Staged repairs" {
-  :prev_snapshot = snapshots[-1];
-
   while (more stages?) is (yes)
     :stage = next(stages);
 
@@ -49,13 +42,10 @@ partition "Staged repairs" {
     :run_validators(stage.post_validators,\n  when=POST_STAGE,\n  stage_name=stage.name);
     :append ValidationSnapshot #i;
 
-    :diff = diff_snapshots(prev_snapshot, current);
-
-    if (diff.introduced contains kinds in\nstage.fail_fast_on?) then (yes)
-      :mark pipeline as failed;
-      break
+    if (any issue.kind in stage.fail_fast_on?) then (yes)
+      :raise PipelineFailFastError;
+      stop
     endif
-    :prev_snapshot = current;
   endwhile (no)
 }
 
@@ -64,14 +54,21 @@ partition "FINAL detection" {
   :append ValidationSnapshot #FINAL;
 }
 
-if (any FATAL in FINAL snapshot?) then (yes)
-  :do NOT export;
-  :return PipelineResult(snapshots, repairs,\n  output_path=None);
-  stop
-else (no)
-  :profile.exporter.write(geom, output_path);
-  :return PipelineResult(geom, snapshots,\n  repairs, output_path);
-  stop
-endif
+partition "Export (unconditional)" {
+  while (more exporters?) is (yes)
+    :exporter = next(profile.exporters);
+    :target = exporter.path_for(output_path)\n         if defined else output_path;
+    :exporter.write(geom, target);
+  endwhile (no)
+}
+
+:return PipelineResult(geom, snapshots,\n  repairs, str(output_path));
+stop
+
+note right
+  Snapshot diffing (diff_snapshots) and "is the result acceptable?"
+  policy live in the calling service, NOT in run_pipeline. The pipeline
+  always exports unless a stage fail_fast_on triggers.
+end note
 
 @enduml
