@@ -1,16 +1,32 @@
 from collections import defaultdict
 import json
 import logging
-from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass
+from typing import List, Dict, Any, Tuple, Optional
 from app.utils.geometry_utils import FaceRecord, _uedge
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Cavity:
+    """Represents a detected enclosed cavity.
+
+    oriented_faces: list of (face_index, sign) where sign is +1 if the
+    face's normal points out of the cavity, -1 if it points into the cavity.
+    face_index refers to the index in the `faces` list passed to the exporter.
+    """
+    id: int
+    name: str
+    volume: float
+    oriented_faces: List[Tuple[int, int]]
 
 def export_processed_topology_to_gmsh_geo(
     faces: List[FaceRecord],
     unique_vertices: List[Tuple[float, float, float]],
     geo_file: str,
     volume_name: str = "RoomVolume",
+    cavities: Optional[List[Cavity]] = None,
 ) -> Tuple[int, int]:
     """
     Export processed topology to Gmsh GEO file.
@@ -92,12 +108,28 @@ def export_processed_topology_to_gmsh_geo(
             g.write(f"Plane Surface({sid}) = {{ {sid} }};\n")
         g.write("\n")
 
-        # Surface Loop + Volume
-        total_surfaces = len(face_line_loops)
-        surf_list = ", ".join(str(i) for i in range(1, total_surfaces + 1))
-        g.write(f"Surface Loop(1) = {{ {surf_list} }};\n")
-        g.write("Volume(1) = { 1 };\n")
-        g.write(f'Physical Volume("{volume_name}") = {{ 1 }};\n')
+        # Surface Loop(s) + Volume(s)
+        if not cavities:
+            # legacy single-volume behavior: include all plane surfaces
+            total_surfaces = len(face_line_loops)
+            surf_list = ", ".join(str(i) for i in range(1, total_surfaces + 1))
+            g.write(f"Surface Loop(1) = {{ {surf_list} }};\n")
+            g.write("Volume(1) = { 1 };\n")
+            g.write(f'Physical Volume("{volume_name}") = {{ 1 }};\n')
+        else:
+            # Write a surface loop + volume per detected cavity. Each face
+            # corresponds to a Plane Surface with id = face_index + 1.
+            for cid, cav in enumerate(cavities, start=1):
+                surf_ids = []
+                for face_idx, sign in cav.oriented_faces:
+                    sid = face_idx + 1
+                    surf_ids.append(str(sid if sign > 0 else -sid))
+                surf_list = ", ".join(surf_ids)
+                g.write(f"Surface Loop({cid}) = {{ {surf_list} }};\n")
+                g.write(f"Volume({cid}) = {{ {cid} }};\n")
+            # Physical Volume names
+            for cid, cav in enumerate(cavities, start=1):
+                g.write(f'Physical Volume("{cav.name}") = {{ {cid} }};\n')
 
         # Physical Surfaces
         for mat, surface_indices in physical_surfaces_dict.items():

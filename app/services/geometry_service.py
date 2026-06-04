@@ -847,7 +847,7 @@ def _run_new_pipeline_for_obj(
 
     geom = _ObjImporter().load(_Path(obj_file))
 
-    profile = _wave_based_profile(volume_name=volume_name)
+    profile = _wave_based_profile(detect_cavities=True, volume_name=volume_name)
     ctx = _Context(
         tolerances=_Tolerances(),
         logger=_logging.getLogger("geometry.pipeline"),

@@ -70,7 +70,7 @@ def _wave_based_stages(tjunc, intersect, *, inspect: bool = False) -> list[Stage
         ),
         Stage(
             name="t_junctions",
-            repairs=[],
+            repairs=[] if inspect else [FixTJunctionsIterativeRepair(detector=tjunc)],
             post_validators=[tjunc] if inspect else [],
         ),
         Stage(
@@ -102,8 +102,19 @@ def _wave_based_final_validators(tjunc, intersect) -> list:
     ]
 
 
-def wave_based_profile(volume_name: str = "RoomVolume") -> SimulationProfile:
-    """Full profile: detect → repair → emit OBJ + GEO."""
+def wave_based_profile(
+    volume_name: str = "RoomVolume",
+    *,
+    detect_cavities: bool = False,
+    cavity_pitch: float = 0.05,
+    cavity_closing_iterations: int = 0,
+) -> SimulationProfile:
+    """Full profile: detect → repair → emit OBJ + GEO.
+
+    When `detect_cavities=True`, the GEO exporter runs the voxel-based cavity
+    detector and emits one `Volume` per enclosed region (required by Gmsh
+    when the geometry contains nested/attached enclosed objects).
+    """
     tjunc = TJunctionsValidator()
     intersect = IntersectionsValidator()
     return SimulationProfile(
@@ -114,7 +125,12 @@ def wave_based_profile(volume_name: str = "RoomVolume") -> SimulationProfile:
         final_validators=_wave_based_final_validators(tjunc, intersect),
         exporters=[
             ObjExporter(),
-            GmshGeoExporter(volume_name=volume_name),
+            GmshGeoExporter(
+                volume_name=volume_name,
+                detect_cavities=detect_cavities,
+                cavity_pitch=cavity_pitch,
+                cavity_closing_iterations=cavity_closing_iterations,
+            ),
         ],
         tolerances=Tolerances(),
     )
