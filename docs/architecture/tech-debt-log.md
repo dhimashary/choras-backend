@@ -1,3 +1,35 @@
+# Technical Debt Log — Volume Detection
+
+Entries related to recent reorganization and native-only production policy.
+
+ 2026-06-05: Move native detector sources into `app/geometry/volume_detection/` to
+  consolidate C++ artifacts. Files moved: `volume_detector.cpp`,
+  `CMakeLists.txt`, `build.sh` → `app/geometry/volume_detection/`.
+   native detector in the builder stage (`app/geometry/volume_detection/build.sh`). The
+- 2026-06-05: Remove automatic fallback to Python voxel detector in
+   repository history and CI workspaces; unify on `app/geometry/volume_detection`.
+  implementation remains in `app/geometry/cavity_detector.py` for testing and
+  debugging but is not used in production exports.
+
+- 2026-06-05: Dockerfile updated to multi-stage build and to compile the
+  native detector in the builder stage (`app/geometry/volume_detection/build.sh`). The
+  runtime image sets `VOLUME_DETECTOR_BIN=/app/bin/volume_detector`.
+
+- 2026-06-05: Outstanding cleanup — native build artifacts under
+  `native/build/` remain in the repo working tree. These should be removed
+  or added to `.gitignore` prior to merging to reduce noise and avoid
+  accidentally committing binaries; CI should perform a clean build.
+
+- Technical debt items / future work:
+  - Remove leftover `native/` directory and its build artifacts from the
+    repository history and CI workspaces; unify on `app/geometry/volume_detection`.
+  - Expose `MultiScaleParams` as CLI args or a small JSON config so callers
+    can tune detection without recompiling.
+  - Provide a small test harness/fixture that runs the compiled binary in CI
+    so breakage is caught early (current unit tests do not require the
+    binary).
+  - Consider packaging the native detector as a small Debian package or
+    multi-platform release artifact to simplify production deployments.
 # Tech-debt log captured during PR1–PR3 refactor
 
 Bugs, smells and surprising behaviour we noticed but **did not fix** to keep

@@ -4,6 +4,11 @@
 .DS_Store
 results.pkl
 
+# Native volume detector build artifacts
+/bin/
+native/build/
+generated-obj-volume/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -235,5 +240,3 @@ results*.json
 # Used to completely reset environment in Docker, for e.g. 
 # database schema modifications 
 rebuild.sh
-
-*.cpp

@@ -239,6 +239,51 @@ Apply CI/CD with Github Actions to automatically deployed to AWS platform use EC
 
 ## Commands
 
+## Optional: Native volume detector (CGAL)
+
+The repository includes an optional high-robustness native detector implemented
+in C++ using CGAL. This detector is the recommended default for multi-scale
+scenes (large rooms with small furniture cavities) but is optional — the
+Python voxel detector is a fallback and requires no native build.
+
+Local build (macOS/Homebrew):
+
+```bash
+# install deps
+brew install cgal eigen cmake
+# build native detector
+./app/geometry/volume_detection/build.sh
+```
+
+Local build (Debian/Ubuntu):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential cmake libcgal-dev libeigen3-dev
+./app/geometry/volume_detection/build.sh
+```
+
+When built the binary is placed at `bin/volume_detector` and the Python
+bridge will use it automatically. To force the pure-Python voxel detector,
+construct the exporter with `GmshGeoExporter(detection_mode="voxel")`.
+
+Docker / CI guidance
+
+- The project Dockerfile now uses a multi-stage build to optionally compile
+  the native detector and copy the binary into the final image. If you
+  want the native detector available in your Docker image (recommended for
+  production when you need the robustness), build the image with the usual
+  `docker build` or `docker-compose build` (the builder stage will install
+  system packages and compile CGAL).
+- The runtime container sets `VOLUME_DETECTOR_BIN=/app/bin/volume_detector` by
+  default. You can override this environment variable to point at a different
+  path if necessary.
+
+If you prefer not to compile CGAL in the image (to keep image build time and
+size small), the image will still build, but production detection requires
+the native binary. The exporter will raise an error at runtime if the
+binary is missing.
+
 You can run the following commands in order to use specific features of the application. Note that all of these
 commands are also ran in the pipeline on every commit, but it is recommended to run them locally too. Most notably,
 [PEP8 verification](#pep8-verification-flake8), [Import sorting](#import-sorting-isort), and

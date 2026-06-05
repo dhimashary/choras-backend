@@ -113,7 +113,9 @@ def test_exporter_emits_multiple_volumes_when_detection_enabled(tmp_path: Path):
     mesh = Mesh(vertices=outer_pts + inner_pts, faces=outer_faces + inner_faces)
 
     geo_path = tmp_path / "out.geo"
-    GmshGeoExporter(detect_cavities=True, cavity_pitch=0.05).write(mesh, geo_path)
+    GmshGeoExporter(
+        detect_cavities=True, detection_mode="voxel", cavity_pitch=0.05
+    ).write(mesh, geo_path)
     text = geo_path.read_text()
 
     assert "Volume(1) = { 1 };" in text

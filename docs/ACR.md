@@ -49,7 +49,7 @@ drawbacks, defaults, and operational guidance for engineers and reviewers.
 - `cavity_pitch`: 0.05 (model units)
 - `closing_iterations`: 0
 
-The repository previously experimented with a hybrid coarse→local-refine detector; however the current checked-in code uses the global voxelization approach above. `GmshGeoExporter` computes diagonal-based tuning heuristics for hybrid/advanced modes when present, but the primary exported detector remains the global voxelizer unless explicitly changed.
+The repository previously experimented with a hybrid coarse→local-refine detector; the global voxelization approach above is now the **fallback** detector. As of ACR 3, the default exported detector is the native multi-scale shell-based C++ tool (`detection_mode="native"`), which automatically falls back to this global voxelizer when the binary is unavailable or fails.
 
 **Operational guidance**
 
@@ -141,6 +141,146 @@ and how it contrasts with the global Python voxelizer.
 - Provide the C++ tool as an optional, installable binary (e.g., `obj_volume_mapper`).
 - Export the `volume -> faces` mapping as JSON and have the Python exporter
   consume it when present; fall back to in-Python voxel detection otherwise.
+
+---
+
+ACR 3 — Multi-scale shell-based detection + Python↔C++ subprocess bridge (current native default)
+
+**Status**
+
+Implemented and wired as the **default** detection path. `GmshGeoExporter`
+now uses `detection_mode="native"` by default, which calls the compiled
+C++ detector and *automatically falls back* to the Python voxel detector
+(ACR 1) when the binary is unavailable or fails.
+
+**Motivation — why the previous strategies were not enough**
+
+- The global voxelizer (ACR 1) and the single global grid (ACR 2) both use
+  **one cell size for the whole model**: `step = max_dim / target_resolution`.
+- A scene with a large room *and* small furniture cavities is multi-scale.
+  If `step` is large enough to keep the room cheap, any cavity whose interior
+  half-width is below `clearance_factor * step` produces **zero free cells**
+  and is never discovered. If `step` is small enough for the furniture, the
+  room's grid becomes `O(resolution³)` and explodes in time/memory.
+- Increasing probe factors does **not** fix this: probes only change how far
+  off a face surface we sample an *already-built* grid; they cannot recover a
+  volume that has no free cells.
+
+**Strategy (current implementation)**
+
+Drive detection from **mesh connectivity**, not from a global free-space grid:
+
+1. **Shell extraction** — split the mesh into connected surface shells using
+   shared-edge adjacency (`UndirectedEdge` BFS). Furniture that is separate
+   geometry from the room walls becomes its own shell automatically.
+   (`extract_face_shells`)
+2. **Per-shell local grid** — for each shell, build a free-space grid whose
+   `step` is relative to **that shell's own bounding box**, then run the
+   existing ACR 2 visibility-aware labeling on it. Small shells get a fine
+   grid; the big room gets a coarse one. Each shell's cost is bounded by its
+   own `target_resolution`, so the room never forces a globally fine grid.
+   (`detect_volumes_multiscale`)
+3. **Shared AABB tree** — the full-mesh CGAL AABB tree is used for distance
+   and visibility queries inside every local grid, so neighbouring geometry
+   still blocks leaks correctly.
+4. **Boundary = surrounding air** — a local free-space component touching the
+   local box boundary is the room air / true exterior and is ignored; a
+   component fully enclosed by the shell becomes a bounded volume. Global
+   volume ids are allocated lazily, so regions no shell face bounds never
+   create spurious empty volumes.
+5. **Min-shell-size filter** — shells whose bbox diagonal is below
+   `min_shell_diag_frac` (default 1%) of the whole-model diagonal are skipped,
+   filtering loose triangles / decorative slivers. Set to 0 to disable.
+6. Orientation sign per `(volume, face)` and per-volume manifoldness are
+   emitted exactly as in ACR 2.
+
+**Input contract — mesh IR over JSON (not OBJ)**
+
+The C++ tool now reads the Python mesh IR directly via a small strict JSON
+reader, in addition to still accepting OBJ for standalone debugging
+(dispatched by file extension in `read_mesh`):
+
+```json
+{
+  "vertices": [[x, y, z], ...],
+  "faces":    [[i0, i1, i2, ...], ...]   // 0-based indices into vertices
+}
+```
+
+Face order equals the Python `faces` list order, so the C++ `face_id` maps
+back to the Python face index with no lookup table.
+
+**Python↔C++ connection — subprocess + temp files**
+
+- The bridge (`app/geometry/volume_detector_bridge.py`) serializes the IR to
+  a temp `mesh.json`, runs `bin/volume_detector mesh.json volumes.json` via
+  `subprocess`, parses the JSON, and converts it to `Cavity` objects.
+ - Chosen over pybind11 / ctypes deliberately: the subprocess bridge avoids
+   tight ABI coupling and keeps native logic isolated. In earlier drafts the
+   binary was optional, but the current production policy requires the native
+   binary be built and available; failures should be surfaced rather than
+   silently falling back.
+- Appropriate because detection runs once per export (not a hot loop) and the
+  exchanged data is small.
+
+**Implementation locations**
+
+- Native detector: `volume_detector.cpp` (repo root)
+- Build: `native/CMakeLists.txt`, `native/build.sh` → `bin/volume_detector`
+- Bridge: `app/geometry/volume_detector_bridge.py`
+- Exporter wiring (`detection_mode`): `app/geometry/io/exporters/geo.py`
+- Tests (no binary needed): `tests/test_volume_detector_bridge.py`
+
+**Benefits**
+
+- Resolves genuine multi-scale scenes (big room + small furniture) that no
+  single-global-grid method can.
+- Per-shell cost is bounded by the shell's own resolution, not the model's
+  largest dimension.
+- Inherits ACR 2 robustness (exact CGAL predicates, visibility-aware
+  labeling, manifoldness).
+- Optional and self-healing: missing/failed binary degrades to voxel mode.
+
+**Drawbacks & Limitations**
+
+- Total cost scales with the **number of shells** (≈ shells × resolution³
+  distance queries). Models with very many separate pieces do more total work
+  than one coarse grid; mitigated by `min_shell_diag_frac`.
+- Assumes the relevant cavity boundary is a single connected shell. A cavity
+  enclosed by *several disconnected* shells (e.g. a lid that is separate
+  geometry resting on a box) may be split across shells; this is a known edge
+  case not yet handled.
+- Still grid-based, not analytically exact — sub-`step` features inside a
+  shell can be missed, though the shell-relative `step` makes this far rarer.
+- Adds a native build dependency (CGAL + toolchain) for the default path; the
+  Python fallback keeps the system runnable without it.
+
+**Current defaults (`MultiScaleParams` in `volume_detector.cpp`)**
+
+- `target_resolution`: 64 (per shell)
+- `clearance_factor`: 0.16
+- `probe_factors`: {0.18, 0.30, 0.45, 0.60}
+- `component_search_radius_cells`: 4
+- `bbox_inflate_frac`: 0.06
+- `min_shell_diag_frac`: 0.01
+
+> Note: these are compiled-in C++ defaults; the Python bridge cannot yet tune
+> them per call (see "Smells / next actions").
+
+**Operational guidance**
+
+- Cavities missed inside a shell: raise `target_resolution` or lower
+  `clearance_factor`.
+- Stray fragments creating noise volumes: raise `min_shell_diag_frac`.
+ - Force the legacy path: construct `GmshGeoExporter(detection_mode="voxel")`.
+ - Binary not built: the exporter will raise an error; build with
+  `./app/geometry/volume_detection/build.sh` to enable the native path.
+
+**Authors / History**
+
+- Multi-scale shell strategy, mesh-IR JSON input, and subprocess bridge added
+  during `engd_project_2026_v2` branch work. Supersedes ACR 2's single global
+  grid as the recommended/default native path.
 
 ---
 

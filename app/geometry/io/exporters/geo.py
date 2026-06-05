@@ -21,6 +21,7 @@ class GmshGeoExporter:
         volume_name: str = "RoomVolume",
         *,
         detect_cavities: bool = True,
+        detection_mode: str = "native",
         cavity_pitch: float = 0.05,
         cavity_closing_iterations: int = 0,
     ) -> None:
@@ -29,16 +30,23 @@ class GmshGeoExporter:
         ----------
         volume_name : Name used for the single Physical Volume in legacy
             output, or as fallback when detection fails / yields nothing.
-        detect_cavities : If True, run the voxel-based cavity detector before
-            writing and emit one `Surface Loop` + `Volume` per detected
-            cavity (Gmsh requires every enclosed space to be its own volume).
-        cavity_pitch : Voxel size (model units) for detection. Must be
-            smaller than the smallest wall thickness you care about.
+        detect_cavities : If True, run cavity detection before writing and
+            emit one `Surface Loop` + `Volume` per detected cavity (Gmsh
+            requires every enclosed space to be its own volume).
+                detection_mode : One of:
+                        - "native" (default): use the C++ CGAL grid+visibility detector
+                            (``bin/volume_detector``); robust for multi-scale scenes
+                            (big rooms + small furniture cavities). This path is the
+                            production default and does not fall back to the voxel detector.
+                        - "voxel": use the pure-Python voxel detector (kept for testing).
+        cavity_pitch : Voxel size (model units) for the *voxel* detector. Must
+            be smaller than the smallest wall thickness you care about.
         cavity_closing_iterations : Optional morphological closing iterations
-            to bridge sub-pitch gaps before labeling. 0 disables.
+            (voxel detector only) to bridge sub-pitch gaps before labeling.
         """
         self.volume_name = volume_name
         self.detect_cavities = detect_cavities
+        self.detection_mode = detection_mode
         self.cavity_pitch = cavity_pitch
         self.cavity_closing_iterations = cavity_closing_iterations
 
@@ -68,6 +76,26 @@ class GmshGeoExporter:
         )
 
     def _run_detection(self, faces, points) -> Optional[List[Cavity]]:
+        mode = self.detection_mode
+        if mode == "native":
+            # In production we require the native detector; propagate errors
+            # rather than silently falling back to the Python voxelizer.
+            return self._run_native_detection(faces, points)
+        elif mode == "voxel":
+            return self._run_voxel_detection(faces, points)
+        else:
+            raise ValueError(f"Unsupported detection_mode: {mode}")
+
+    def _run_native_detection(self, faces, points) -> Optional[List[Cavity]]:
+        """Return cavities from the native detector.
+
+        Raises when the native binary is missing or detection fails.
+        """
+        from app.geometry.volume_detector_bridge import detect_volumes_native
+
+        return detect_volumes_native(faces, points)
+
+    def _run_voxel_detection(self, faces, points) -> Optional[List[Cavity]]:
         try:
             # Imported lazily so trimesh/scipy are only required when
             # cavity detection is actually enabled.
