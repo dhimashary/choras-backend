@@ -12,9 +12,6 @@ from app.services.geometry_export_service import (
     export_processed_topology_to_gmsh_geo,
 )
 
-logger = logging.getLogger(__name__)
-
-
 class GmshGeoExporter:
     def __init__(
         self,
@@ -93,7 +90,10 @@ class GmshGeoExporter:
         """
         from app.geometry.volume_detector_bridge import detect_volumes_native
 
-        return detect_volumes_native(faces, points)
+        try:
+            return detect_volumes_native(faces, points)
+        except Exception as exc:
+            return None
 
     def _run_voxel_detection(self, faces, points) -> Optional[List[Cavity]]:
         try:
@@ -107,16 +107,8 @@ class GmshGeoExporter:
                 closing_iterations=self.cavity_closing_iterations,
             )
             if not cavities:
-                logger.info(
-                    "Cavity detector found no enclosed regions; "
-                    "falling back to single-volume output."
-                )
                 return None
             return cavities
         except Exception as exc:
-            logger.warning(
-                "Cavity detection failed (%s); falling back to single-volume output.",
-                exc, exc_info=True,
-            )
             return None
 

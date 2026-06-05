@@ -6,8 +6,21 @@ FROM --platform=${BUILD_PLATFORM} python:3.11.13-slim AS base
 WORKDIR /app
 
 # Runtime dependencies (keep minimal)
+# libglu1-mesa / libgl1 / libxrender1 / libxcursor1 / libxft2 / libxinerama1:
+# the gmsh Python wheel dynamically links against OpenGL/GLU + X11 libs even
+# for headless meshing, so they must be present or `import gmsh` fails with
+# "libGLU.so.1: cannot open shared object file".
 RUN apt-get update && \
-    apt-get install -y postgresql-client git && \
+    apt-get install -y --no-install-recommends \
+        postgresql-client \
+        git \
+        libglu1-mesa \
+        libgl1 \
+        libgomp1 \
+        libxrender1 \
+        libxcursor1 \
+        libxft2 \
+        libxinerama1 && \
     apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 # Upgrade pip and install build dependencies

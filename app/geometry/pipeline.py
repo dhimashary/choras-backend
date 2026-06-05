@@ -132,6 +132,9 @@ def run_pipeline(
     one per executed Stage, and one for FINAL — enabling stage-by-stage
     diffing via `app.geometry.diff.diff_snapshots`.
     """
+    logger = ctx.logger
+    
+    logger.warning("Running pipeline %r on geometry kind %r", profile.name, geom.kind)
     if geom.kind != profile.target_ir.kind:
         raise ValueError(
             f"Profile {profile.name!r} expects IR kind {profile.target_ir.kind!r}, "
@@ -140,7 +143,7 @@ def run_pipeline(
 
     snapshots: list[ValidationSnapshot] = []
     repairs = RepairReport()
-
+    logger.warning("Pipeline %r: starting PRE-validation", profile.name)
     # PRE
     pre = run_validators(
         geom, profile.pre_validators, ctx,
@@ -148,7 +151,7 @@ def run_pipeline(
     )
     snapshots.append(pre)
     accumulated_issues = list(pre.issues)
-
+    logger.warning("Pipeline %r: completed PRE-validation with %d issue(s)", profile.name, len(pre.issues))
     # Stages
     for stage in profile.stages:
         geom, snap = run_stage(geom, stage, ctx, repairs, accumulated_issues)
@@ -156,13 +159,14 @@ def run_pipeline(
         # Post-stage issues feed into the next stage's affected_ids matching.
         accumulated_issues = list(snap.issues)
 
+    logger.warning("Pipeline %r: completed all stages, starting FINAL validation", profile.name)
     # FINAL
     final = run_validators(
         geom, profile.final_validators, ctx,
         when=DetectionStage.FINAL, stage_name="",
     )
     snapshots.append(final)
-
+    logger.warning("Pipeline %r: completed FINAL validation with %d issue(s)", profile.name, len(final.issues)) 
     # Export
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -173,7 +177,7 @@ def run_pipeline(
             "[pipeline] wrote %s at %s",
             target, datetime.now(timezone.utc).isoformat(timespec="seconds"),
         )
-
+    logger.warning("Pipeline %r: completed export to %s", profile.name, output_path)
     return PipelineResult(
         geometry=geom,
         snapshots=snapshots,

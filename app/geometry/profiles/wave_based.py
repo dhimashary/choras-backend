@@ -18,6 +18,7 @@ from app.geometry.repairs.fix_t_junctions import FixTJunctionsIterativeRepair
 from app.geometry.repairs.orient_outward import FlipFacesIfMajorityInwardRepair
 from app.geometry.repairs.remove_degenerate_faces import RemoveDegenerateFacesRepair
 from app.geometry.repairs.repair_intersections import (
+    RepairPlcByOffsetRepair,
     RepairPlcSingleSplitsRepair,
     TrimSegmentFaceIntersectionsRepair,
 )
@@ -81,6 +82,7 @@ def _wave_based_stages(tjunc, intersect, *, inspect: bool = False) -> list[Stage
                 else [
                     TrimSegmentFaceIntersectionsRepair(detector=intersect),
                     RepairPlcSingleSplitsRepair(detector=intersect),
+                    # RepairPlcByOffsetRepair(detector=intersect),
                 ]
             ),
             post_validators=[intersect],

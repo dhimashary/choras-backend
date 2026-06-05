@@ -2945,7 +2945,6 @@ def repair_plc_by_offset_iterative(
             bbox_pad=1e-9,
             max_reports=2000,
             skip_warped_faces=True,
-            logger=logger,
         )
 
         summary["remaining_plc_hits"] = len(plc_hits)
@@ -2955,7 +2954,7 @@ def repair_plc_by_offset_iterative(
             summary["stopped_reason"] = "no_plc_hits"
             if logger:
                 logger.info("[PLC OFFSET] stable after %d iterations: no PLC hits", it - 1)
-            return points, changed_any, summary
+            return faces, points, changed_any, summary
 
         endpoint_face_hits = [
             r for r in plc_hits
@@ -2967,7 +2966,7 @@ def repair_plc_by_offset_iterative(
             summary["stopped_reason"] = "no_endpoint_face_interior_touch"
             if logger:
                 logger.info("[PLC OFFSET] stop: PLC hits remain, but none are endpoint_face_interior_touch")
-            return points, changed_any, summary
+            return faces, points, changed_any, summary
 
         # Apply one repair at a time, then re-detect.
         target = endpoint_face_hits[0]
@@ -2984,7 +2983,7 @@ def repair_plc_by_offset_iterative(
             summary["stopped_reason"] = "selected_offset_not_applied"
             if logger:
                 logger.info("[PLC OFFSET] stop: selected report was not changed; diag=%s", diag)
-            return points, changed_any, summary
+            return faces, points, changed_any, summary
 
         changed_any = True
         summary["applied_repairs"] += 1
@@ -2996,7 +2995,7 @@ def repair_plc_by_offset_iterative(
     if logger:
         logger.warning("[PLC OFFSET] reached max_iters=%d", max_iters)
 
-    return points, changed_any, summary
+    return faces, points, changed_any, summary
 
 # -------- REPAIR MULTI HIT POINT-FACE INTERSECTION BY SPLITTING WITH NEW VERTEX --------
 def _find_face_by_fid(faces: List["FaceRecord"], fid: int):

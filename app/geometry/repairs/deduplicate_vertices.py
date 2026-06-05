@@ -8,7 +8,6 @@ introduces near-duplicates.
 """
 from __future__ import annotations
 
-import logging
 from typing import ClassVar
 
 from app.geometry.context import Context
@@ -17,11 +16,31 @@ from app.geometry.issues import Issue, IssueKind
 from app.geometry.report import RepairResult
 from app.services.geometry_parsing_service import deduplicate_vertices
 
-
 class DeduplicateVerticesRepair:
     name: ClassVar[str] = "deduplicate_vertices"
     accepts: ClassVar[set[str]] = {"mesh"}
     handles: ClassVar[set[IssueKind]] = {IssueKind.DUPLICATE_VERTEX}
+
+    @staticmethod
+    def _remove_consecutive_duplicate_indices(
+        indices: list[int],
+    ) -> list[int]:
+        """Remove consecutive duplicate vertices and repeated closing vertex."""
+        if not indices:
+            return []
+
+        cleaned = [indices[0]]
+
+        for idx in indices[1:]:
+            if idx != cleaned[-1]:
+                cleaned.append(idx)
+
+        # Remove explicit closing vertex:
+        # [1,2,3,1] -> [1,2,3]
+        if len(cleaned) > 1 and cleaned[0] == cleaned[-1]:
+            cleaned.pop()
+
+        return cleaned
 
     def apply(
         self,
@@ -30,26 +49,57 @@ class DeduplicateVerticesRepair:
         ctx: Context,
     ) -> tuple[Mesh, RepairResult]:
         old_points = [(v.x, v.y, v.z) for v in geom.vertices]
+
         unique_points, orig_to_unique = deduplicate_vertices(
-            old_points, tol=ctx.tolerances.vertex_merge,
+            old_points,
+            tol=ctx.tolerances.vertex_merge,
         )
 
-        new_faces = [
-            Face(
-                vertex_indices=[orig_to_unique[vid] for vid in f.vertex_indices],
-                group=f.group,
-                material=f.material,
+        new_faces: list[Face] = []
+        removed_invalid_face_ids: list[int] = []
+        cleaned_duplicate_face_ids: list[int] = []
+
+        for face_idx, face in enumerate(geom.faces):
+            remapped_indices = [
+                orig_to_unique[vid]
+                for vid in face.vertex_indices
+            ]
+
+            cleaned_indices = self._remove_consecutive_duplicate_indices(
+                remapped_indices
             )
-            for f in geom.faces
-        ]
+
+            if cleaned_indices != remapped_indices:
+                cleaned_duplicate_face_ids.append(face_idx)
+
+            if len(set(cleaned_indices)) < 3:
+                removed_invalid_face_ids.append(face_idx)
+                continue
+
+            new_faces.append(
+                Face(
+                    vertex_indices=cleaned_indices,
+                    group=face.group,
+                    material=face.material,
+                )
+            )
+
         new_mesh = Mesh(
-            vertices=[Vertex(p[0], p[1], p[2]) for p in unique_points],
+            vertices=[
+                Vertex(p[0], p[1], p[2])
+                for p in unique_points
+            ],
             faces=new_faces,
             materials=dict(geom.materials),
             metadata=dict(geom.metadata),
         )
 
-        affected = [i.id for i in issues if i.kind == IssueKind.DUPLICATE_VERTEX]
+        affected = [
+            issue.id
+            for issue in issues
+            if issue.kind == IssueKind.DUPLICATE_VERTEX
+        ]
+
         result = RepairResult(
             step_name=self.name,
             stage_name=ctx.extras.get("stage_name", ""),
@@ -59,6 +109,11 @@ class DeduplicateVerticesRepair:
             details={
                 "merged_vertex_count": len(old_points) - len(unique_points),
                 "tolerance": ctx.tolerances.vertex_merge,
+                "cleaned_duplicate_face_count": len(cleaned_duplicate_face_ids),
+                "cleaned_duplicate_face_ids": cleaned_duplicate_face_ids,
+                "removed_invalid_face_count": len(removed_invalid_face_ids),
+                "removed_invalid_face_ids": removed_invalid_face_ids,
             },
         )
+
         return new_mesh, result

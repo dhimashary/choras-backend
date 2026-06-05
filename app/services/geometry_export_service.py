@@ -20,6 +20,7 @@ class Cavity:
     name: str
     volume: float
     oriented_faces: List[Tuple[int, int]]
+    is_manifold: bool = False  # True if the detector says every volume boundary edge is used exactly twice.
 
 def export_processed_topology_to_gmsh_geo(
     faces: List[FaceRecord],
@@ -110,27 +111,69 @@ def export_processed_topology_to_gmsh_geo(
 
         # Surface Loop(s) + Volume(s)
         if not cavities:
-            # legacy single-volume behavior: include all plane surfaces
+            # Legacy single-volume behavior: include all plane surfaces.
             total_surfaces = len(face_line_loops)
             surf_list = ", ".join(str(i) for i in range(1, total_surfaces + 1))
+
             g.write(f"Surface Loop(1) = {{ {surf_list} }};\n")
             g.write("Volume(1) = { 1 };\n")
             g.write(f'Physical Volume("{volume_name}") = {{ 1 }};\n')
-        else:
-            # Write a surface loop + volume per detected cavity. Each face
-            # corresponds to a Plane Surface with id = face_index + 1.
-            for cid, cav in enumerate(cavities, start=1):
-                surf_ids = []
-                for face_idx, sign in cav.oriented_faces:
-                    sid = face_idx + 1
-                    surf_ids.append(str(sid if sign > 0 else -sid))
-                surf_list = ", ".join(surf_ids)
-                g.write(f"Surface Loop({cid}) = {{ {surf_list} }};\n")
-                g.write(f"Volume({cid}) = {{ {cid} }};\n")
-            # Physical Volume names
-            for cid, cav in enumerate(cavities, start=1):
-                g.write(f'Physical Volume("{cav.name}") = {{ {cid} }};\n')
 
+        else:
+            # Merge non-manifold cavities into the main room volume.
+            # key   = abs(surface id)
+            # value = signed surface id
+            main_volume_surfaces: dict[int, int] = {}
+            separate_volumes: list[tuple[str, list[int]]] = []
+
+            for cav in cavities:
+                is_manifold = getattr(cav, "is_manifold", True)
+
+                if cav.id == 0 or not is_manifold:
+                    for face_idx, sign in cav.oriented_faces:
+                        sid = face_idx + 1
+                        signed_sid = sid if sign > 0 else -sid
+
+                        # Treat +sid and -sid as the same surface.
+                        if sid not in main_volume_surfaces:
+                            main_volume_surfaces[sid] = signed_sid
+
+                else:
+                    surf_ids: list[int] = []
+
+                    for face_idx, sign in cav.oriented_faces:
+                        sid = face_idx + 1
+                        surf_ids.append(sid if sign > 0 else -sid)
+
+                    separate_volumes.append((cav.name, surf_ids))
+
+            physical_volumes: list[tuple[str, int]] = []
+
+            if main_volume_surfaces:
+                surf_list = ", ".join(
+                    str(signed_sid)
+                    for signed_sid in main_volume_surfaces.values()
+                )
+
+                g.write(f"Surface Loop(1) = {{ {surf_list} }};\n")
+                g.write("Volume(1) = { 1 };\n")
+                physical_volumes.append((volume_name, 1))
+
+                next_volume_id = 2
+            else:
+                next_volume_id = 1
+
+            for cav_name, surf_ids in separate_volumes:
+                surf_list = ", ".join(str(sid) for sid in surf_ids)
+
+                g.write(f"Surface Loop({next_volume_id}) = {{ {surf_list} }};\n")
+                g.write(f"Volume({next_volume_id}) = {{ {next_volume_id} }};\n")
+
+                physical_volumes.append((cav_name, next_volume_id))
+                next_volume_id += 1
+
+            for cav_name, volume_id in physical_volumes:
+                g.write(f'Physical Volume("{cav_name}") = {{ {volume_id} }};\n')        
         # Physical Surfaces
         for mat, surface_indices in physical_surfaces_dict.items():
             gmsh_ids = ", ".join(str(i + 1) for i in surface_indices)

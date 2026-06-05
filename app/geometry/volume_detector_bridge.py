@@ -80,6 +80,7 @@ def _cavities_from_json(payload: dict) -> List[Cavity]:
     for vol in payload.get("volumes", []):
         vid = int(vol["volume_id"])
         oriented_faces: List[Tuple[int, int]] = []
+        is_manifold = bool(vol.get("is_manifold", True))
         for face in vol.get("faces", []):
             face_idx = int(face["face_id"])
             sign = int(face.get("sign", 1))
@@ -92,6 +93,7 @@ def _cavities_from_json(payload: dict) -> List[Cavity]:
                 name=f"Cavity_{vid}" if vid > 0 else "RoomVolume",
                 volume=0.0,  # native tool does not compute metric volume
                 oriented_faces=oriented_faces,
+                is_manifold=is_manifold,
             )
         )
     return cavities
@@ -119,11 +121,17 @@ def detect_volumes_native(
             "or set VOLUME_DETECTOR_BIN."
         )
 
+    logger.info(
+        "Native volume detector: binary=%s, faces=%d, vertices=%d",
+        binary, len(faces), len(unique_vertices),
+    )
+
     with tempfile.TemporaryDirectory(prefix="volume_detector_") as tmp:
         tmp_dir = Path(tmp)
         mesh_path = tmp_dir / "mesh.json"
         json_path = tmp_dir / "volumes.json"
         _write_mesh_json(faces, unique_vertices, mesh_path)
+        mesh_raw = mesh_path.read_text()
 
         try:
             proc = subprocess.run(
@@ -139,6 +147,14 @@ def detect_volumes_native(
                 f"Native volume detector timed out after {timeout}s."
             ) from exc
 
+        # Always surface the tool's own diagnostics; the C++ detector prints
+        # progress/decisions to stdout/stderr which are essential when the
+        # result differs between environments (e.g. local vs Docker).
+        if proc.stdout and proc.stdout.strip():
+            logger.debug("Native detector stdout:\n%s", proc.stdout.strip())
+        if proc.stderr and proc.stderr.strip():
+            logger.warning("Native detector stderr:\n%s", proc.stderr.strip())
+
         if proc.returncode != 0:
             raise RuntimeError(
                 "Native volume detector failed "
@@ -150,11 +166,41 @@ def detect_volumes_native(
                 "Native volume detector produced no JSON output."
             )
 
+        raw = json_path.read_text()
         try:
-            payload = json.loads(json_path.read_text())
+            payload = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise RuntimeError(
                 f"Could not parse native detector JSON: {exc}"
             ) from exc
 
-    return _cavities_from_json(payload)
+    cavities = _cavities_from_json(payload)
+    n_volumes = len(payload.get("volumes", []))
+
+    # Optional: persist the exact input/output for cross-environment debugging.
+    # Set VOLUME_DETECTOR_DEBUG_DIR=/app/uploads to capture mesh.json + volumes.json.
+    debug_dir = os.environ.get("VOLUME_DETECTOR_DEBUG_DIR")
+    if debug_dir:
+        try:
+            out = Path(debug_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            # (out / "last_mesh.json").write_text(mesh_raw)
+            # (out / "last_volumes.json").write_text(raw)
+            # logger.info("Wrote detector debug files to %s", out)
+        except Exception as exc:  # never let debugging break the pipeline
+            logger.warning("Could not write detector debug files: %s", exc)
+
+    if not cavities:
+        logger.warning(
+            "Native volume detector ran successfully (exit 0) but reported "
+            "%d volume(s) and yielded 0 usable cavities. The GEO will fall "
+            "back to a single volume. Raw output: %s",
+            n_volumes, raw[:2000],
+        )
+    else:
+        logger.info(
+            "Native volume detector produced %d cavity/cavities from %d "
+            "reported volume(s).",
+            len(cavities), n_volumes,
+        )
+    return cavities

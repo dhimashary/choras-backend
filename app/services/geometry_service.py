@@ -804,7 +804,7 @@ def obj_to_gmsh_geo_precise(obj_file, geo_file, rhino3dm_path, volume_name="Room
         g.write('Mesh.CharacteristicLengthFromPoints = 1;\n')
         g.write('// Recombine Surface "*";\n')
 
-    print(f"Wrote {geo_file}: {len(unique_vertices)} points, {next_line_id-1} lines, {len(face_line_loops)} surfaces.")
+    # print(f"Wrote {geo_file}: {len(unique_vertices)} points, {next_line_id-1} lines, {len(face_line_loops)} surfaces.")
     return True
 
 def _run_new_pipeline_for_obj(
@@ -848,6 +848,7 @@ def _run_new_pipeline_for_obj(
     geom = _ObjImporter().load(_Path(obj_file))
 
     profile = _wave_based_profile(detect_cavities=True, volume_name=volume_name)
+    
     ctx = _Context(
         tolerances=_Tolerances(),
         logger=_logging.getLogger("geometry.pipeline"),
