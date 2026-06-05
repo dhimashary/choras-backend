@@ -235,3 +235,5 @@ results*.json
 # Used to completely reset environment in Docker, for e.g. 
 # database schema modifications 
 rebuild.sh
+
+*.cpp

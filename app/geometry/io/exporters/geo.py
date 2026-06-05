@@ -23,7 +23,6 @@ class GmshGeoExporter:
         detect_cavities: bool = True,
         cavity_pitch: float = 0.05,
         cavity_closing_iterations: int = 0,
-        cavity_auto_scale_target_diag: float = 5.0,
     ) -> None:
         """
         Parameters
@@ -42,7 +41,6 @@ class GmshGeoExporter:
         self.detect_cavities = detect_cavities
         self.cavity_pitch = cavity_pitch
         self.cavity_closing_iterations = cavity_closing_iterations
-        self.cavity_auto_scale_target_diag = cavity_auto_scale_target_diag
 
     def write(
         self,
@@ -79,8 +77,6 @@ class GmshGeoExporter:
                 faces, points,
                 pitch=self.cavity_pitch,
                 closing_iterations=self.cavity_closing_iterations,
-                auto_scale=True,
-                auto_scale_target_diag=self.cavity_auto_scale_target_diag,
             )
             if not cavities:
                 logger.info(

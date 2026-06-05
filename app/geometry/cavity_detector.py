@@ -89,8 +89,6 @@ def detect_cavities(
     closing_iterations: int = 0,
     name_largest_as_room: bool = True,
     min_cavity_voxels: int = 1,
-    auto_scale: bool = True,
-    auto_scale_target_diag: float = 5.0,
 ) -> List[Cavity]:
     """Detect enclosed cavities. Returns a list of `Cavity` sorted by
     descending volume.
