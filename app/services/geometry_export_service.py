@@ -2,8 +2,10 @@ from collections import defaultdict
 import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 from app.utils.geometry_utils import FaceRecord, _uedge
+import rhino3dm
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,34 @@ def export_processed_topology_to_gmsh_geo(
             ori = line_orientation[lid]
             loop_line_ids.append(lid if ori == (a, b) else -lid)
         face_line_loops.append(loop_line_ids)
-        
+    
+    # looking for 3dm path
+    base_path = Path(geo_file)
+    three_dm_path = base_path.with_name(base_path.stem + ".3dm")
+
+    model = None
+    # Validate 3dm availability before trying to read it
+    if three_dm_path.exists():
+        try:
+            model = rhino3dm.File3dm.Read(str(three_dm_path))
+        except Exception as ex:
+            logger.warning("Failed to read 3DM model at %s: %s", three_dm_path, ex)
+            model = None
+    else:
+        logger.info("3DM model not found at %s; continuing without material mapping", three_dm_path)
+
+    # Material mapping for later use
+    material_to_id = {}
+    if model is not None:
+        for obj in model.Objects:
+            if isinstance(obj.Geometry, rhino3dm.Mesh):
+                material_name = obj.Geometry.GetUserString("material_name")
+                if material_name:
+                    material_to_id[f"{obj.Attributes.Id}"] = material_name
+    else:
+        # No model -> leave material mapping empty. Downstream code will handle missing materials.
+        logger.debug("No 3DM model available; material_to_id mapping will be empty.")
+
     # Physical surface groups: material -> list of 0-based face indices
     physical_surfaces_dict: Dict = {}
     for idx, face in enumerate(faces):
@@ -174,10 +203,12 @@ def export_processed_topology_to_gmsh_geo(
 
             for cav_name, volume_id in physical_volumes:
                 g.write(f'Physical Volume("{cav_name}") = {{ {volume_id} }};\n')        
+        
         # Physical Surfaces
-        for mat, surface_indices in physical_surfaces_dict.items():
-            gmsh_ids = ", ".join(str(i + 1) for i in surface_indices)
-            g.write(f'Physical Surface("{mat}") = {{ {gmsh_ids} }};\n')
+        ii = 1
+        for grp in material_to_id:
+            g.write(f'Physical Surface("{grp}") = {{ { str(ii) } }};\n')
+            ii = ii + 1
 
         # Physical Lines
         lines_all = ", ".join(str(i) for i in range(1, next_line_id))

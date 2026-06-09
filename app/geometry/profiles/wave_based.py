@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from app.geometry.io.exporters.geo import GmshGeoExporter
 from app.geometry.io.exporters.obj import ObjExporter
+from app.geometry.io.exporters.three_dm import ThreeDMExporter
 from app.geometry.ir import Mesh
 from app.geometry.profile import SimulationProfile, Stage
 from app.geometry.repairs.deduplicate_vertices import DeduplicateVerticesRepair
@@ -127,6 +128,10 @@ def wave_based_profile(
         final_validators=_wave_based_final_validators(tjunc, intersect),
         exporters=[
             ObjExporter(),
+            # 3DM exporter consumes the OBJ produced by ObjExporter
+            # and converts it to a Rhino 3DM using the existing converter.
+            # Placed after ObjExporter so the .obj file is available on disk.
+            ThreeDMExporter(),
             GmshGeoExporter(
                 volume_name=volume_name,
                 detect_cavities=detect_cavities,
