@@ -913,31 +913,46 @@ def _run_inspect_pipeline_for_obj(
     result = _run_pipeline(geom, profile, report_path, ctx)
     payload = _to_inspect_report(result)
 
+    # Compute issue_count: sum lengths of list-valued top-level keys
+    def _count_issues(obj):
+        total = 0
+        if isinstance(obj, dict):
+            for v in obj.values():
+                if isinstance(v, list):
+                    total += len(v)
+                elif isinstance(v, dict):
+                    # count lists inside nested dicts
+                    for sv in v.values():
+                        if isinstance(sv, list):
+                            total += len(sv)
+        return total
+
+    try:
+        payload_issue_count = _count_issues(payload)
+    except Exception:
+        payload_issue_count = 0
+
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(_json.dumps(payload, indent=2, default=str))
-    return report_file
+
+    return report_file, payload_issue_count
 
 
-def run_inspect_for_file_upload(file_upload_id: int) -> dict:
-    """Resolve the OBJ for a File row, run the inspect pipeline, return JSON."""
+def run_inspect_for_file_upload(file_name: str, issue_path: str) -> tuple[str, int]:
+    """Resolve the OBJ for a File row, run the inspect pipeline and return
+    a tuple `(report_path, issue_count)`.
+    """
     from config import DefaultConfig
 
-    file = File.query.filter_by(id=file_upload_id).first()
-    if file is None:
-        abort(404, message=f"File {file_upload_id} not found")
-
     directory = DefaultConfig.UPLOAD_FOLDER
-    file_name, _ = os.path.splitext(os.path.basename(file.fileName))
     obj_path = os.path.join(directory, f"{file_name}.obj")
-    report_path = os.path.join(directory, f"{file_name}_inspect_report.json")
 
     if not os.path.exists(obj_path):
-        abort(400, message=f"OBJ not found for file {file_upload_id} at {obj_path}")
+        abort(400, message=f"OBJ not found for file {file_name} at {obj_path}")
 
-    _run_inspect_pipeline_for_obj(obj_path, report_path)
+    _, payload_issue_count = _run_inspect_pipeline_for_obj(obj_path, issue_path)
 
-    with open(report_path, "r") as fp:
-        return json.load(fp)
+    return issue_path, payload_issue_count
 
 
 def obj_to_gmsh_geo_precise_with_repair_pipeline(

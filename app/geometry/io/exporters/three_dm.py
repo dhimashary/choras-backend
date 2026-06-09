@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import logging
+import zipfile
 
 from app.geometry.ir import Mesh
 from app.geometry.io.exporters.obj import ObjExporter
@@ -24,18 +25,21 @@ class ThreeDMExporter:
         # Ensure OBJ exists (use the same convention as ObjExporter)
         self.logger.warning(f"Preparing to export 3DM to {path} from Mesh IR; ensuring OBJ exists")
         base_path = Path(path)
-        obj_path = base_path.with_name(base_path.stem + "_repaired.obj")
+
+        # Use the same naming convention as ObjExporter: replace the suffix with .obj
+        obj_path = base_path.with_suffix(".obj")
         self.logger.warning(f"Expected OBJ path for 3DM export: {obj_path}")
-        
+        clean_stem = base_path.stem.removesuffix("_repaired")
+
         if not obj_path.exists():
             # Generate OBJ from the Mesh IR first
             ObjExporter().write(geom, obj_path)
 
         # Convert OBJ -> 3DM using the existing converter
-        rhino_path = base_path.with_name(base_path.stem + ".3dm")
+        rhino_path = base_path.with_name(clean_stem + ".3dm")
 
         # If a previous .3dm exists, move it to `_initial.3dm` (overwrite if exists)
-        initial_path = base_path.with_name(base_path.stem + "_initial.3dm")
+        initial_path = base_path.with_name(clean_stem + "_old.3dm")
         try:
             if rhino_path.exists():
                 if initial_path.exists():
@@ -49,4 +53,11 @@ class ThreeDMExporter:
 
         converter = ObjConversion()
         converter.generate_3dm(str(obj_path), str(rhino_path))
+
+        #replacethe old zip file with a new one containing the new 3dm file
+        zip_file_path = base_path.with_name(clean_stem + ".zip")
+        self.logger.warning(f"Creating ZIP archive at {zip_file_path} containing {rhino_path.name}")
+        with zipfile.ZipFile(zip_file_path, "w") as zipf:
+                zipf.write(rhino_path, arcname=rhino_path.name) 
+
         self.logger.warning(f"Converted {obj_path} to {rhino_path} using ObjConversion")

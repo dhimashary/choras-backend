@@ -12,10 +12,8 @@ from app.db import db
 from app.models import Model, File, ModelIssue
 from app.types import DetectionStage
 from app.services.geometry_service import (
-    convert_repaired_obj_to_gmsh_geo,
-    detect_geometry_issues,
-    generate_repaired_obj_and_issue_report,
     obj_to_gmsh_geo_precise_with_repair_pipeline,
+    run_inspect_for_file_upload,
 )
 from app.services.geometry_export_service import export_geometry_issues_to_json
 from config import FeatureToggle, DefaultConfig
@@ -33,76 +31,53 @@ def create_new_model(model_data):
         outputFileId=model_data["sourceFileId"],
         imagePath=model_data["imagePath"] if "imagePath" in model_data else None,
     )
-    
-    
-
-    if FeatureToggle.is_enabled("enable_geo_conversion"):
-        new_model.hasGeo = True
-
-        directory = DefaultConfig.UPLOAD_FOLDER
-        file = File.query.filter_by(id=model_data["sourceFileId"]).first()
-        if file:
-            file_name, _ = os.path.splitext(os.path.basename(file.fileName))
-            obj_path = os.path.join(directory, f"{file_name}.obj")
-            rhino3dm_path = os.path.join(directory, f"{file_name}.3dm")
-            geo_path = os.path.join(directory, f"{file_name}.geo")
-            try:
-                obj_to_gmsh_geo_precise_with_repair_pipeline(
-                    obj_path,
-                    geo_path,
-                    rhino3dm_path,
-                    volume_name="RoomVolume",
-                )
-                logger.info(f"Generated .geo file at: {geo_path}")
-            except Exception as ex:
-                logger.warning(
-                    f"Failed to run geometry repair pipeline for source file {file.fileName}: {ex}"
-                )
+    # Persist the new model instance so it receives an id (use flush so caller
+    # can still rollback the whole transaction if something fails below).
+    db.session.add(new_model)
     try:
-        db.session.add(new_model)
+        db.session.flush()  # now new_model.id is available
+
+        if FeatureToggle.is_enabled("enable_geo_conversion"):
+            new_model.hasGeo = True
+
+            directory = DefaultConfig.UPLOAD_FOLDER
+            file = File.query.filter_by(id=model_data["sourceFileId"]).first()
+            if file:
+                file_name, _ = os.path.splitext(os.path.basename(file.fileName))
+                obj_path = os.path.join(directory, f"{file_name}.obj")
+                rhino3dm_path = os.path.join(directory, f"{file_name}.3dm")
+                geo_path = os.path.join(directory, f"{file_name}.geo")
+                issue_path = os.path.join(directory, f"{file_name}_issue.json")
+                try:
+                    _, issue_count = run_inspect_for_file_upload(file_name, issue_path)
+                    logger.warning(
+                        f"Inspect report for file upload {model_data['sourceFileId']} generated at: {report_path} with {issue_count} issues found"
+                    )
+
+                    model_issue = ModelIssue(
+                        modelId=new_model.id,
+                        fileName=issue_path,
+                        issueCount=issue_count,
+                        detectionStage=DetectionStage.AfterUpload,
+                    )
+                    db.session.add(model_issue)
+
+                    # TODO: turn off the repair later for separate repair call
+                    obj_to_gmsh_geo_precise_with_repair_pipeline(
+                        obj_path,
+                        geo_path,
+                        rhino3dm_path,
+                        volume_name="RoomVolume",
+                    )
+                    logger.info(f"Generated .geo file at: {geo_path}")
+                except Exception as ex:
+                    # don't abort creation for pipeline failures; log and continue
+                    logger.warning(
+                        f"Failed to run geometry repair pipeline for source file {file.fileName}: {ex}"
+                    )
+
+        # commit the model (and any model_issue) together
         db.session.commit()
-
-        # # Detect geometry issues and store in ModelIssue
-        # directory = DefaultConfig.UPLOAD_FOLDER
-        # file = File.query.filter_by(id=model_data["sourceFileId"]).first()
-        # if file:
-        #     file_name, file_extension = os.path.splitext(os.path.basename(file.fileName))
-        #     obj_path = os.path.join(directory, f"{file_name}.obj")
-        #     rhino3dm_path = os.path.join(directory, f"{file_name}.3dm")
-        #     geo_path = os.path.join(directory, f"{file_name}.geo")
-        #     zip_file_path = os.path.join(directory, f"{file_name}.zip")
-
-        #     try:
-        #         detected_geometry_issues = detect_geometry_issues(obj_path, rhino3dm_path)
-        #         issue_report_path, issue_count = export_geometry_issues_to_json(detected_geometry_issues, obj_path)
-        #         model_issue = ModelIssue(
-        #             modelId=new_model.id,
-        #             fileName=f"{file_name}_issues.json",
-        #             issueCount=issue_count,
-        #             detectionStage=DetectionStage.AfterUpload
-        #         )
-                
-        #         db.session.add(model_issue)
-        #         db.session.commit()
-        #         logger.warning(f"Geometry issues detected for model {new_model.id}: {issue_count} issues found. Issue report generated at: {issue_report_path}")
-        #         conversion_factory = GeometryConversionFactory()
-        #         conversion_strategy = conversion_factory.create_strategy('.obj')
-                
-        #         repaired_obj_path, issue_report_path = generate_repaired_obj_and_issue_report(obj_path, rhino3dm_path, tol=1e-2, conformize_tol=None)
-        #         logger.warning(f"Repaired OBJ file generated at: {repaired_obj_path}")
-        #         if not conversion_strategy.generate_3dm(repaired_obj_path, rhino3dm_path):
-        #             logger.error("Can not generate a 3dm file")
-        #             return False
-        #         logger.warning(f"Generated .geo file at: {geo_path}")
-        #         if not convert_repaired_obj_to_gmsh_geo(repaired_obj_path, geo_path, rhino3dm_path):
-        #             logger.error("Can not generate a geo file")
-        #             return False
-                
-        #         # create a zip file from the repaired version
-        #         with zipfile.ZipFile(zip_file_path, "w") as zipf:
-        #             zipf.write(rhino3dm_path, arcname=f"{file_name}.3dm") 
-        #     except Exception as ex:
-        #         logger.warning(f"Failed to detect geometry issues for model {new_model.id}: {ex}")
 
     except Exception as ex:
         db.session.rollback()
