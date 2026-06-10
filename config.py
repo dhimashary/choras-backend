@@ -80,6 +80,15 @@ class DefaultConfig:
         "/app/simulation-backend/methods-config.json"
     )
 
+    # Authoritative CHORAS default for geometry-issue compatibility. Each
+    # simulation method inherits this baseline and may override it via a
+    # "geometryCompatibility" file referenced from methods-config.json
+    # (resolved relative to SETTINGS_FILE_FOLDER, like "settings").
+    GEOMETRY_COMPATIBILITY_BASELINE_PATH = os.environ.get(
+        "GEOMETRY_COMPATIBILITY_BASELINE_PATH",
+        os.path.join(app_dir, "geometry", "compatibility", "baseline.json"),
+    )
+
     
     USER_MODEL_IMAGE_FOLDER_NAME = os.path.join(UPLOAD_FOLDER_NAME, "model_images")
 
