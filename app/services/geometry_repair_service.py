@@ -327,8 +327,10 @@ def trim_component_against_facet_plane(
     seed_face_fids: List[int],
     room_center: Tuple[float, float, float],
     tol: float = 1e-9,
+    max_component_fraction: float = 0.5,
     logger=None,
 ) -> Tuple[List["FaceRecord"], List[Tuple[float, float, float]], bool, Dict[str, Any]]:
+    
     """
     Trim a connected face component against the plane of a clipping facet.
 
@@ -348,6 +350,10 @@ def trim_component_against_facet_plane(
         In CHORAS this is usually the room center.
     tol : float
         Numerical tolerance for clipping and vertex reuse.
+    max_component_fraction : float
+        Safety cap in ``[0, 1]``. If the flood-filled component exceeds this
+        fraction of the total face count, the trim is skipped (treated as a
+        connectivity leak rather than an isolated protrusion). Defaults to 0.5.
     logger : logging.Logger | None
         Optional logger.
 
@@ -412,6 +418,28 @@ def trim_component_against_facet_plane(
 
     if not component_face_fids:
         diag["status"] = "empty_component"
+        return faces, points, False, diag
+
+    # Component-size cap: a legitimate trim target is a small protruding
+    # component (e.g. an object poking through a wall). On watertight rooms
+    # with internal partitions the flood fill can leak across shared edges and
+    # swallow most of the mesh; clipping such a component deletes important
+    # faces. If the component is too large relative to the whole mesh, treat it
+    # as a leak and skip the trim instead of gutting the geometry.
+    component_fraction = len(component_face_fids) / max(1, len(faces))
+    diag["component_fraction"] = component_fraction
+    if component_fraction > max_component_fraction:
+        diag["status"] = "component_too_large_skipped"
+        diag["max_component_fraction"] = max_component_fraction
+        if logger is not None:
+            logger.warning(
+                "[TRIM] facet_fid=%d component_faces=%d/%d (%.1f%%) exceeds cap %.1f%% — skipping trim",
+                clipping_facet_fid,
+                len(component_face_fids),
+                len(faces),
+                component_fraction * 100.0,
+                max_component_fraction * 100.0,
+            )
         return faces, points, False, diag
 
     start_n_points = len(points)

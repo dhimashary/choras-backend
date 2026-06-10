@@ -51,7 +51,7 @@ def create_new_model(model_data):
                 try:
                     _, issue_count = run_inspect_for_file_upload(file_name, issue_path)
                     logger.warning(
-                        f"Inspect report for file upload {model_data['sourceFileId']} generated at: {report_path} with {issue_count} issues found"
+                        f"Inspect report for file upload {model_data['sourceFileId']} generated at: {issue_path} with {issue_count} issues found"
                     )
 
                     model_issue = ModelIssue(
@@ -72,6 +72,7 @@ def create_new_model(model_data):
                     logger.info(f"Generated .geo file at: {geo_path}")
                 except Exception as ex:
                     # don't abort creation for pipeline failures; log and continue
+                    db.session.rollback()
                     logger.warning(
                         f"Failed to run geometry repair pipeline for source file {file.fileName}: {ex}"
                     )

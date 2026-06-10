@@ -63,7 +63,7 @@ def _wave_based_stages(tjunc, intersect, *, inspect: bool = False) -> list[Stage
       - the ``intersections`` stage drops its repairs (detection only)
     """
     return [
-        Stage(name="dedup", repairs=[DeduplicateVerticesRepair()]),
+        Stage(name="deduplication", repairs=[DeduplicateVerticesRepair()]),
         Stage(name="degenerate", repairs=[RemoveDegenerateFacesRepair()]),
         Stage(name="sort", repairs=[SortVerticesDeterministicallyRepair()]),
         Stage(
