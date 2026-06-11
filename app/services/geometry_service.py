@@ -824,7 +824,7 @@ def _run_new_pipeline_for_obj(
     from pathlib import Path as _Path
 
     from app.geometry.context import Context as _Context
-    from app.geometry.io.importers.obj import ObjImporter as _ObjImporter
+    from app.geometry.io.registry import ImporterRegistry as _ImporterRegistry
     from app.geometry.pipeline import run_pipeline as _run_pipeline
     from app.geometry.profiles.wave_based import wave_based_profile as _wave_based_profile
     from app.geometry.tolerances import Tolerances as _Tolerances
@@ -833,19 +833,7 @@ def _run_new_pipeline_for_obj(
     )
     from app.utils.geometry_utils import FaceRecord as _FaceRecord
 
-    def _to_face_records(faces):
-        return [
-            _FaceRecord(
-                fid=idx,
-                verts=list(f.vertex_indices),
-                group=f.group or "default",
-                group_material=f.group or "default_group_material",
-                material=f.material or "unknown",
-            )
-            for idx, f in enumerate(faces)
-        ]
-
-    geom = _ObjImporter().load(_Path(obj_file))
+    geom = _ImporterRegistry.for_extension(_Path(obj_file).suffix).load(_Path(obj_file))
 
     profile = _wave_based_profile(detect_cavities=True, volume_name=volume_name)
     
@@ -855,27 +843,8 @@ def _run_new_pipeline_for_obj(
         profile_name=profile.name,
     )
 
-    # topology_before = build_topology_report(
-    #     [(v.x, v.y, v.z) for v in geom.vertices],
-    #     _to_face_records(geom.faces),
-    # )
-
     _run_pipeline(geom, profile, _Path(geo_file), ctx)
 
-    # topology_after = build_topology_report(
-    #     [(v.x, v.y, v.z) for v in result.geometry.vertices],
-    #     _to_face_records(result.geometry.faces),
-    # )
-
-    # report = _to_legacy(
-    #     result,
-    #     input_path=obj_file,
-    #     output_path=geo_file,
-    #     topology_before=topology_before,
-    #     topology_after=topology_after,
-    # )
-    # report_path = geo_file.replace(".geo", "_report.json")
-    # write_geometry_processing_report(report, report_path)
     return True
 
 
@@ -893,7 +862,7 @@ def _run_inspect_pipeline_for_obj(
     from pathlib import Path as _Path
 
     from app.geometry.context import Context as _Context
-    from app.geometry.io.importers.obj import ObjImporter as _ObjImporter
+    from app.geometry.io.registry import ImporterRegistry as _ImporterRegistry
     from app.geometry.io.inspect_report import to_inspect_report as _to_inspect_report
     from app.geometry.pipeline import run_pipeline as _run_pipeline
     from app.geometry.profiles.wave_based import (
@@ -901,7 +870,7 @@ def _run_inspect_pipeline_for_obj(
     )
     from app.geometry.tolerances import Tolerances as _Tolerances
 
-    geom = _ObjImporter().load(_Path(obj_file))
+    geom = _ImporterRegistry.for_extension(_Path(obj_file).suffix).load(_Path(obj_file))
     profile = _wave_based_inspect_profile()
     ctx = _Context(
         tolerances=_Tolerances(),

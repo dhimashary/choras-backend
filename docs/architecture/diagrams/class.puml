@@ -109,7 +109,7 @@ package io {
   }
   class ImporterRegistry {
     +register(imp : Importer)
-    +get_for(ext : str) : Importer
+    +for_extension(ext : str) : Importer
   }
   class ExporterRegistry {
     +register(exp : Exporter)
@@ -169,13 +169,8 @@ package report {
     +snapshots : list<ValidationSnapshot>
     +repairs : RepairReport
     +output_path : Optional<str>
-    +initial : Optional<ValidationSnapshot>
-    +final   : Optional<ValidationSnapshot>
-  }
-  class SnapshotDiff {
-    +fixed : list<Issue>
-    +introduced : list<Issue>
-    +remaining : list<Issue>
+    +initial() : Optional<ValidationSnapshot>  ' property (computed from snapshots)
+    +final()   : Optional<ValidationSnapshot>  ' property (computed from snapshots)
   }
   PipelineResult --> "*" ValidationSnapshot
   PipelineResult --> RepairReport
@@ -207,13 +202,17 @@ class "pipeline" as PipelineMod <<module>> {
   +run_validators(geom, vs, ctx, when, stage_name) : ValidationSnapshot
   +run_stage(geom, stage, ctx, repair_report) : (Geometry, ValidationSnapshot)
 }
-class "diff" as DiffMod <<module>> {
-  +diff_snapshots(before, after) : SnapshotDiff
-}
-
 PipelineMod ..> SimulationProfile
 PipelineMod ..> ValidationSnapshot
-PipelineMod ..> Issue
-DiffMod    ..> SnapshotDiff
+PipelineMod ..> PipelineResult : returns
+
+' make type usages explicit
+SimulationProfile --> Tolerances
+SimulationProfile --> Geometry : target_ir
+PipelineResult --> Geometry
+PipelineMod ..> Context
+PipelineMod ..> Geometry
+PipelineMod ..> ImporterRegistry
+ImporterRegistry --> Importer
 
 @enduml
