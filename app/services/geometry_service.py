@@ -743,7 +743,7 @@ def run_geometry_pipeline(
             obj_dir,
             out_dir,
             volume_name=volume_name,
-            detect_cavities=False,
+            detect_cavities=config.FeatureToggle.is_enabled("enable_volume_detection"),
             on_checkpoint=on_checkpoint,
         )
     except Exception as exc:

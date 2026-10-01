@@ -185,6 +185,8 @@ class CustomExportParametersConfig(DefaultConfig):
 class FeatureToggle(DefaultConfig):
     # Uncomment this line to enable geo conversion from input geometry
     enable_geo_conversion = True
+    # Toggle native CGAL volume/cavity detection in the geometry pipeline
+    enable_volume_detection = True
 
     @classmethod
     def is_enabled(cls, feature_name: str) -> bool:
